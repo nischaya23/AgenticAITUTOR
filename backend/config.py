@@ -20,3 +20,6 @@ AGGREGATION_SECONDS = float(os.getenv('AGGREGATION_SECONDS', '15'))
 TYPING_GRACE_SECONDS = float(os.getenv('TYPING_GRACE_SECONDS', '4'))
 BANDIT_WARMUP = int(os.getenv('BANDIT_WARMUP', '12'))
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
