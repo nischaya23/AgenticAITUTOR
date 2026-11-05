@@ -44,7 +44,7 @@ def extract_text(filename: str, content: bytes) -> str:
     return text
 
 
-def save_material(filename: str, content: bytes, text: str) -> dict:
+def save_material(filename: str, content: bytes, text: str, graph: dict | None = None) -> dict:
     directory = config.DATA_DIR / 'materials'
     directory.mkdir(parents=True, exist_ok=True)
     material_id = uuid.uuid4().hex
@@ -52,7 +52,7 @@ def save_material(filename: str, content: bytes, text: str) -> dict:
     (directory / f'{material_id}{suffix}').write_bytes(content)
     chunks = [dict(id=f'{material_id}:{i}', source=Path(filename).name,
                    text=text[start:start+1400]) for i, start in enumerate(range(0, len(text), 1100))]
-    record = dict(id=material_id, name=Path(filename).name, chunks=chunks)
+    record = dict(id=material_id, name=Path(filename).name, chunks=chunks, graph=graph)
     temporary = directory / f'{material_id}.tmp'
     temporary.write_text(json.dumps(record), encoding='utf-8')
     temporary.replace(directory / f'{material_id}.json')
@@ -64,8 +64,16 @@ def list_materials() -> list[dict]:
     return [json.loads(p.read_text(encoding='utf-8')) for p in sorted(directory.glob('*.json'))]
 
 
-def retrieve_knowledge(query: str, limit: int = 4) -> list[dict]:
-    chunks = [c for m in list_materials() for c in m['chunks']]
+def get_material(material_id: str) -> dict:
+    for material in list_materials():
+        if material['id'] == material_id:
+            return material
+    raise ValueError('Material not found. Upload it again.')
+
+
+def retrieve_knowledge(query: str, limit: int = 4, material_id: str | None = None) -> list[dict]:
+    records = [get_material(material_id)] if material_id else list_materials()
+    chunks = [c for m in records for c in m['chunks']]
     if not chunks:
         return []
     counts = [Counter(tokens(c['text'])) for c in chunks]
@@ -104,9 +112,13 @@ def store_graph(db, graph: ConceptGraph):
             db.flush()
         rows[name] = row.id
     edges = {(e.from_id, e.to_id) for e in db.scalars(select(ConceptEdge))}
+    accepted = []
     for edge in graph.prerequisites:
         a, b = rows.get(edge.prerequisite), rows.get(edge.concept)
-        if a is None or b is None or a == b or (a, b) in edges:
+        if a is None or b is None or a == b:
+            continue
+        if (a, b) in edges:
+            accepted.append(edge)
             continue
         # Adding a -> b is valid only if b cannot already reach a.
         frontier, seen = [b], set()
@@ -118,9 +130,15 @@ def store_graph(db, graph: ConceptGraph):
         if a not in seen:
             db.add(ConceptEdge(from_id=a, to_id=b))
             edges.add((a, b))
+            accepted.append(edge)
+    return ConceptGraph(concepts=names, prerequisites=accepted)
 
 
-def get_prerequisites(db, concept: str) -> list[str]:
+def get_prerequisites(db, concept: str, material_id: str | None = None) -> list[str]:
+    if material_id:
+        graph = get_material(material_id).get('graph') or {}
+        return [edge['prerequisite'] for edge in graph.get('prerequisites', [])
+                if edge['concept'] == concept]
     row = db.scalar(select(Concept).where(Concept.name == concept))
     if row is None:
         return []

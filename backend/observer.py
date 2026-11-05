@@ -76,19 +76,26 @@ def observe(state: dict, kind: str, data: dict, mastery: float, policy: dict,
              recent_hint_count=len(o['hint_times']), concept_mastery=mastery,
              time_since_intervention=max(0, t-o.get('last_intervention_at', t-3600)))
     action = 'WAIT'
+    reason = 'Waiting for more evidence of difficulty'
+    evaluated_scores = None
     eligible = f['failure_streak'] >= config.FAILURE_THRESHOLD and f['time_since_progress'] >= config.STALL_SECONDS
     if (state.get('ended') or not state.get('proactive_enabled', True)
             or o.get('pending_wake') or o.get('pending_intervention')
             or f['time_since_intervention'] < config.COOLDOWN_SECONDS):
+        reason = 'Inactive' if state.get('ended') or not state.get('proactive_enabled', True) else 'Waiting for pending help or cooldown'
         action = 'WAIT'
     elif t-o.get('last_edit_at', 0) < config.TYPING_GRACE_SECONDS:
+        reason = 'You are still typing'
         action = 'DEFER'
     elif t-o.get('last_decision_at', 0) < config.AGGREGATION_SECONDS:
+        reason = 'Gathering recent activity'
         action = 'DEFER'
     else:
         o['last_decision_at'] = t
         if eligible:
             s = scores(policy, f)
+            evaluated_scores = dict(zip(ACTIONS, s))
+            reason = 'Difficulty detected; evaluating whether to offer help'
             action = 'WAKE' if policy['updates'] < config.BANDIT_WARMUP or s[1] > s[0]+.05 else 'WAIT'
         # Snapshot a WAIT only at an eligible decision, for comparable feedback.
         if eligible and action == 'WAIT' and not o.get('pending_decision'):
@@ -96,6 +103,7 @@ def observe(state: dict, kind: str, data: dict, mastery: float, policy: dict,
     if action == 'WAKE':
         o['pending_wake'] = True
         o['wake_features'] = f
+    o['status'] = dict(decision=action, reason=reason, timestamp=t, features=f, scores=evaluated_scores)
     METRICS[f'observer_{action.lower()}'] += 1
     METRICS['observer_events'] += 1
     METRICS['observer_latency_ms'] += (time.perf_counter()-started)*1000

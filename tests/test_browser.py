@@ -19,7 +19,8 @@ def test_all_interventions_materials_and_mobile(tmp_path):
         probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
     base=f'http://127.0.0.1:{port}'
     env={**os.environ,'DEMO_MODE':'true','DATABASE_URL':f'sqlite:///{tmp_path / "ui.db"}',
-         'DATA_DIR':str(tmp_path/'materials')}
+         'DATA_DIR':str(tmp_path/'materials'),'FAILURE_THRESHOLD':'1','STALL_SECONDS':'0',
+         'AGGREGATION_SECONDS':'0','TYPING_GRACE_SECONDS':'0'}
     server=subprocess.Popen([sys.executable,'-m','uvicorn','backend.main:app','--host','127.0.0.1',
                              '--port',str(port)],cwd=root,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
@@ -39,29 +40,27 @@ def test_all_interventions_materials_and_mobile(tmp_path):
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(base)
-            page.get_by_text('Connected',exact=True).wait_for()
-            page.locator('#workspace').fill('Keep the first match inside [left, right).')
-            page.locator('[data-tool=hint]').click()
-            page.locator('.message .label',has_text='HINT').wait_for()
-            for kind in ('explanation','highlight','visualization','guiding_question'):
-                page.locator(f'[data-tool={kind}]').click()
-                page.locator('.message .label',has_text=kind.replace('_',' ').upper()).wait_for()
-            page.locator('.diagram').wait_for()
-            page.get_by_text('Show highlighted passage',exact=True).click()
-            page.locator('#highlight-preview mark').wait_for()
-            assert page.locator('#highlight-preview mark').inner_text()=='Keep the first match inside [left, right).'
-            page.locator('#answer').fill('1');page.locator('#attempt-form button').click()
-            page.get_by_text('✓ Correct.',exact=False).wait_for()
-            page.locator('#upload').set_input_files({'name':'queues.md','mimeType':'text/markdown','buffer':b'# Queues\nA queue uses FIFO.'})
-            page.locator('#material-list button',has_text='queues.md').wait_for()
-            page.reload();page.get_by_text('Connected',exact=True).wait_for()
-            assert page.locator('#workspace').input_value()=='Keep the first match inside [left, right).'
-            assert page.locator('.message .label').count()>=5
+            assert page.locator('button').count()==6
+            page.locator('#upload').set_input_files({'name':'course.md','mimeType':'text/markdown',
+                'buffer':b'# Binary Search\nBinary search narrows a sorted interval.'})
+            playwright.expect(page.locator('#workspace')).to_be_enabled()
+            playwright.expect(page.locator('#material-name')).to_have_text('course.md')
+            playwright.expect(page.locator('#graph svg')).to_be_visible()
+            playwright.expect(page.locator('#mastery')).to_contain_text('Not assessed yet')
+            page.locator('#workspace').fill('Keep the first match in the interval.')
+            page.wait_for_timeout(1200)  # Allow the documented one-second edit debounce.
+            page.reload()
+            playwright.expect(page.locator('#workspace')).to_have_value('Keep the first match in the interval.')
+            page.locator('#answer').fill('wrong');page.locator('#submit').click()
+            playwright.expect(page.locator('.intervention strong')).to_contain_text('guiding question')
+            playwright.expect(page.locator('#mastery')).to_contain_text('40%')
+            old=page.locator('#problem').inner_text()
+            page.locator('#answer').fill('1');page.locator('#submit').click()
+            playwright.expect(page.locator('#problem')).not_to_have_text(old)
+            playwright.expect(page.locator('#mastery')).to_contain_text('52%')
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.set_viewport_size({'width':390,'height':844})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-            page.locator('#end-session').click()
-            page.locator('.content',has_text='Practiced Binary Search').wait_for()
             assert not errors,errors
             browser.close()
     finally:

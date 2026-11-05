@@ -41,8 +41,16 @@ app = FastAPI(title='Agentic AI Tutor', lifespan=lifespan)
 app.mount('/static', StaticFiles(directory=config.ROOT / 'frontend'), name='static')
 
 
+def observer_status(state):
+    status = dict(state.get('observer', {}).get('status') or {})
+    status['revision'] = state.get('revision', 0)
+    if state.get('ended') or state.get('study_complete'):
+        status.update(decision='INACTIVE', reason='Session ended or learning target reached')
+    return status
+
+
 def public_state(state: dict) -> dict:
-    return {**{k: v for k, v in state.items() if k != 'observer'},
+    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k != 'observer'},
         'current_problem': {k: v for k, v in state.get('current_problem', {}).items()
                             if k not in ('expected_answer', 'rubric')}}
 
@@ -144,12 +152,121 @@ async def upload_material(file: UploadFile = File(...)):
     try:
         text = await asyncio.to_thread(knowledge.extract_text, name, content)
         graph = await knowledge.extract_concepts(text)
-        record = await asyncio.to_thread(knowledge.save_material, name, content, text)
         with SessionLocal.begin() as db:
-            knowledge.store_graph(db, graph)
+            graph = knowledge.store_graph(db, graph)
+        record = await asyncio.to_thread(knowledge.save_material, name, content, text, graph.model_dump())
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {'id': record['id'], 'name': record['name'], 'concepts': graph.model_dump()}
+
+
+MASTERY_TARGET = .75  # A progression heuristic, not a calibrated probability.
+
+
+def study_snapshot(db, session_id: int) -> dict:
+    row = require_session(db, session_id)
+    state = row.state
+    material = knowledge.get_material(state['material_id'])
+    graph = material.get('graph')
+    if not graph or not graph['concepts']:
+        raise HTTPException(409, 'Upload the material again to build its study graph.')
+    mastery = memory.get_long_term_memory(db, row.user_id)['mastery']
+    return dict(type='study_state', state=public_state(state), material=material,
+        graph={'nodes': [dict(id=name, label=name, mastery=mastery.get(name),
+                              active=name == state.get('current_concept')) for name in graph['concepts']],
+               'edges': [dict(source=e['prerequisite'], target=e['concept'])
+                         for e in graph['prerequisites']]},
+        mastery_target=MASTERY_TARGET)
+
+
+def select_study_concept(graph: dict, mastery: dict) -> str | None:
+    remaining = [n for n in graph['concepts'] if mastery.get(n, 0) < MASTERY_TARGET]
+    ready = [name for name in remaining if all(
+        mastery.get(e['prerequisite'], 0) >= MASTERY_TARGET
+        for e in graph['prerequisites'] if e['concept'] == name)]
+    if remaining and not ready:
+        raise ValueError('No eligible concept; inspect the material prerequisite graph.')
+    return min(ready, key=lambda name: mastery.get(name, 0)) if ready else None
+
+
+async def advance_study(session_id: int) -> dict | None:
+    """Called under the session job lock; event ingestion stays responsive."""
+    with SessionLocal() as db:
+        row = require_session(db, session_id)
+        state = memory.get_short_term_memory(db, session_id)
+        if state.get('ended'):
+            return study_snapshot(db, session_id)
+        material = knowledge.get_material(state['material_id'])
+        mastery = memory.get_long_term_memory(db, row.user_id)['mastery']
+        concept = select_study_concept(material['graph'], mastery)
+        revision = state['revision']
+        recent = state.get('recent_questions', [])
+    if concept is None:
+        with SessionLocal.begin() as db:
+            state = memory.get_short_term_memory(db, session_id)
+            if state['revision'] != revision:
+                return None
+            memory.update_short_term_memory(db, session_id, {'study_complete': True})
+            return study_snapshot(db, session_id)
+    sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, state['material_id'])
+    sources = sources or material['chunks'][:3]
+    problem = await tools.generate_problem(concept, sources=sources, previous_prompts=recent)
+    with SessionLocal.begin() as db:
+        row = require_session(db, session_id)
+        current = memory.get_short_term_memory(db, session_id)
+        if current['revision'] != revision or current['ended']:
+            return None
+        temporal = {k: v for k, v in current.get('observer', {}).items()
+                    if k in ('last_intervention_at', 'hint_times')}
+        current.update(current_concept=concept, current_problem=problem, workspace='', plan={},
+                       observer=temporal, revision=revision+1, study_complete=False,
+                       recent_questions=(recent+[problem['prompt']])[-6:])
+        orchestrator.persist_observation(db, row, current, 'student_action', {'action': 'problem_opened'})
+        append_event(db, session_id, 'student_action',
+                     {'action': 'problem_opened', 'problem_id': problem['id'], 'concept': concept})
+        return study_snapshot(db, session_id)
+
+
+class StudyRequest(utils.Schema):
+    material_id: str = Field(min_length=1, max_length=100)
+
+
+@app.post('/api/sessions/{session_id}/study')
+async def start_study(session_id: int, request: StudyRequest):
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        try:
+            material = await asyncio.to_thread(knowledge.get_material, request.material_id)
+            if not (material.get('graph') or {}).get('concepts'):
+                raise ValueError('No concepts were extracted. Upload readable learning material.')
+            with SessionLocal.begin() as db:
+                row = require_session(db, session_id)
+                if row.state['ended']:
+                    raise HTTPException(409, 'Start a new session first.')
+                if row.state.get('material_id') not in (None, request.material_id):
+                    raise HTTPException(409, 'Use a new session for different material.')
+                if row.state.get('material_id'):
+                    if row.state.get('study_complete') or (row.state['current_problem'] and
+                        not row.state['current_problem'].get('solved')):
+                        return study_snapshot(db, session_id)
+                else:
+                    memory.update_short_term_memory(db, session_id, {
+                        'material_id': request.material_id, 'current_problem': {}, 'current_concept': '',
+                        'workspace': '', 'observer': {}, 'plan': {}, 'revision': row.state['revision']+1})
+            result = await advance_study(session_id)
+            if result is None:
+                raise HTTPException(409, 'Session changed during setup. Upload again to start a new session.')
+            return result
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@app.get('/api/sessions/{session_id}/study')
+def get_study(session_id: int):
+    with SessionLocal() as db:
+        row = require_session(db, session_id)
+        if not row.state.get('material_id'):
+            raise HTTPException(404, 'Upload material to begin.')
+        return study_snapshot(db, session_id)
 
 
 @app.get('/api/concepts')
@@ -179,8 +296,27 @@ async def run_job(job: dict):
     async with LOCKS.setdefault(sid, asyncio.Lock()):
         await broadcast(sid, {'type': 'busy', 'active': True})
         try:
-            for output in await orchestrator.handle(job):
+            outputs = await orchestrator.handle(job)
+            for output in outputs:
                 await broadcast(sid, output)
+            assessment_output = next((o for o in outputs if o['type'] == 'assessment'), None)
+            if assessment_output:
+                progress = None
+                with SessionLocal() as db:
+                    row = db.get(Session, sid)
+                    studying = bool(row.state.get('material_id'))
+                    if studying:
+                        progress = study_snapshot(db, sid)
+                if progress:
+                    await broadcast(sid, progress)
+                result = assessment_output['result']
+                if studying and result['correct'] and result['verified']:
+                    following = await advance_study(sid)
+                    if following:
+                        await broadcast(sid, following)
+                    else:
+                        await broadcast(sid, {'type': 'error', 'message':
+                            'Your work changed while preparing the next question. Submit your answer again when ready.'})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -192,6 +328,8 @@ async def run_job(job: dict):
         finally:
             with SessionLocal.begin() as db:
                 orchestrator.clear_pending_wake(db, sid)
+            with SessionLocal() as db:
+                await broadcast(sid, {'type': 'observer_status', **observer_status(require_session(db, sid).state)})
             await broadcast(sid, {'type': 'busy', 'active': False})
 
 
@@ -208,6 +346,8 @@ async def websocket(socket: WebSocket, session_id: int):
             return
     await socket.accept()
     SOCKETS[session_id].add(socket)
+    with SessionLocal() as db:
+        await socket.send_json({'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
     try:
         while True:
             raw = await socket.receive_text()
@@ -222,6 +362,8 @@ async def websocket(socket: WebSocket, session_id: int):
                     job = orchestrator.ingest(db, session_id, event)
                 await socket.send_json({'type': 'ack', 'event_id': job['event_id'],
                                         'decision': job['decision'], 'revision': job['revision']})
+                with SessionLocal() as db:
+                    await broadcast(session_id, {'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
                 if job['explicit'] or job['decision'] == 'WAKE' or job['kind'] in ('problem_attempt', 'session_end') or job['replan']:
                     task = asyncio.create_task(run_job(job))
                     TASKS[session_id].add(task)

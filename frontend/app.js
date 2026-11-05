@@ -1,145 +1,188 @@
-/* No external scripts, HTML injection, or execution of student code. */
 const $ = id => document.getElementById(id);
-const state = {id:null, data:null, ws:null, materials:[], selected:null, editTimer:null, lastText:'', localDirty:false, ended:false, reconnect:null};
-let noticeTimer;
-function notice(message){$('notice').textContent=message;$('notice').hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').hidden=true,6500);}
-async function api(path, options={}){
-  const response=await fetch(path, options);
-  const data=await response.json();
-  if(!response.ok) throw new Error(typeof data.detail==='string'?data.detail:'Request failed.');
+const state = {id:null, ws:null, study:null, lastText:'', dirty:false, pending:false,
+  uploading:false, timer:null, reconnect:null, generation:0, currentProblem:null};
+
+function notice(message){$('notice').textContent=message;$('notice').hidden=!message;}
+async function api(path,options={}){
+  const response=await fetch(path,options);
+  const text=await response.text();let data;
+  try{data=JSON.parse(text);}catch{throw Error(`Server request failed (${response.status}). Check the backend log.`);}
+  if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:`Request failed (${response.status}).`);
   return data;
 }
 function send(event){
-  if(state.ended){notice('This session is complete. Start a new session to continue.');return false;}
-  if(state.ws?.readyState!==WebSocket.OPEN){notice('Connection interrupted. Please retry when connected.');return false;}
+  if(state.ws?.readyState!==WebSocket.OPEN){notice('Connection interrupted. Reconnecting; your work remains here.');return false;}
   state.ws.send(JSON.stringify(event));return true;
 }
 function flushEdits(){
-  clearTimeout(state.editTimer);
-  const text=$('workspace').value;
-  if(text!==state.lastText && send({type:'student_action',action:'edit',content:text})){
-    state.lastText=text;state.localDirty=false;
+  clearTimeout(state.timer);const text=$('workspace').value;
+  if(text!==state.lastText){
+    if(!send({type:'student_action',action:'edit',content:text}))return false;
+    state.lastText=text;state.dirty=false;
   }
+  return true;
 }
-function renderPlan(plan){
-  $('objective').textContent=plan?.objective||`Practice ${state.data.current_concept}`;
-  $('plan').replaceChildren();
-  for(const step of plan?.steps||[]){const el=document.createElement('span');el.textContent=step;$('plan').append(el);}
+function renderObserver(o={}){
+  $('observer-status').textContent=`Observer: ${o.decision||'Not evaluated yet'} — ${o.reason||'Waiting for activity'}`;
+  $('observer-details').textContent=JSON.stringify(o,null,2);
 }
-function renderState(data){
-  state.data=data;state.ended=data.ended;state.lastText=data.workspace||'';state.localDirty=false;
-  $('workspace').value=state.lastText;$('problem').textContent=data.current_problem?.prompt||'Ask your tutor to get started.';
-  $('concept').value=data.current_concept;$('proactive').checked=data.proactive_enabled;
-  $('answer').value='';$('assessment').textContent='';$('highlight-preview').hidden=true;
-  renderPlan(data.plan);$('end-session').disabled=state.ended;
+function updateControls(){
+  const problem=state.study?.state.current_problem;
+  const disabled=state.uploading||state.pending||!problem?.id||state.study?.state.study_complete||state.study?.state.ended;
+  document.querySelectorAll('[data-tool]').forEach(b=>b.disabled=!!disabled||state.toolPending||state.ws?.readyState!==WebSocket.OPEN);
+  $('answer').disabled=!!disabled;$('submit').disabled=!!disabled;
+  $('workspace').disabled=state.uploading||!problem?.id||!!state.study?.state.study_complete||!!state.study?.state.ended;
 }
-function addStudent(text){const el=document.createElement('div');el.className='message student';el.textContent=text;$('chat-log').append(el);scrollChat();}
-function scrollChat(){$('chat-log').scrollTop=$('chat-log').scrollHeight;}
-function markText(element,text,start,end){
-  // Server offsets count Unicode code points, while JS strings count UTF-16 units.
-  const chars=Array.from(text), mark=document.createElement('mark');
-  mark.textContent=chars.slice(start,end).join('');
-  element.replaceChildren(document.createTextNode(chars.slice(0,start).join('')),mark,document.createTextNode(chars.slice(end).join('')));
+function svgElement(tag,attrs={}){
+  const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+  for(const [key,value] of Object.entries(attrs))el.setAttribute(key,String(value));
+  return el;
 }
-function applyHighlight(metadata){
-  if(metadata.target==='workspace'){
-    const text=$('workspace').value;
-    if(Array.from(text).slice(metadata.start,metadata.end).join('')!==metadata.quote){notice('The highlighted passage has changed. Ask for a fresh highlight.');return;}
-    $('highlight-preview').hidden=false;markText($('highlight-preview'),text,metadata.start,metadata.end);
-    const chars=Array.from(text);$('workspace').focus();
-    $('workspace').setSelectionRange(chars.slice(0,metadata.start).join('').length,chars.slice(0,metadata.end).join('').length);
-  }else{
-    const material=state.materials.find(m=>m.chunks.some(c=>c.id===metadata.source_id));
-    const chunk=material?.chunks.find(c=>c.id===metadata.source_id);
-    if(chunk){selectMaterial(material.id);markText($('material-view'),chunk.text,metadata.start,metadata.end);}
+function diagram(graph,showMastery=false){
+  const nodes=graph.nodes||[],edges=graph.edges||[],depth=new Map(nodes.map(n=>[n.id,0]));
+  for(let i=0;i<nodes.length;i++)for(const e of edges){
+    if(depth.has(e.source)&&depth.has(e.target))depth.set(e.target,Math.min(nodes.length,Math.max(depth.get(e.target),depth.get(e.source)+1)));
   }
-}
-function renderDiagram(metadata){
-  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
-  const nodes=metadata.nodes||[],cols=2,rows=Math.ceil(nodes.length/cols);
-  svg.setAttribute('viewBox',`0 0 320 ${rows*85+15}`);svg.classList.add('diagram');svg.setAttribute('role','img');svg.setAttribute('aria-label','Concept graph');
-  const positions=new Map(nodes.map((n,i)=>[n.id,{x:10+(i%cols)*155,y:15+Math.floor(i/cols)*85}]));
-  for(const edge of metadata.edges||[]){
-    const a=positions.get(edge.source),b=positions.get(edge.target);if(!a||!b)continue;
-    const line=document.createElementNS(ns,'path');
-    line.setAttribute('d',`M ${a.x+70} ${a.y+27} L ${b.x+70} ${b.y+27}`);line.setAttribute('stroke','#9eb99e');line.setAttribute('fill','none');svg.append(line);
-    const tip=document.createElementNS(ns,'circle');tip.setAttribute('cx',(a.x+b.x)/2+70);tip.setAttribute('cy',(a.y+b.y)/2+27);tip.setAttribute('r','3');tip.setAttribute('fill','#608361');svg.append(tip);
+  const positions=new Map();let row=0;
+  const levels=[...new Set(depth.values())].sort((a,b)=>a-b);
+  for(const level of levels){const group=nodes.filter(n=>depth.get(n.id)===level);
+    group.forEach((n,i)=>positions.set(n.id,{x:12+(i%2)*306,y:12+(row+Math.floor(i/2))*102}));
+    row+=Math.ceil(group.length/2);
   }
-  for(const node of nodes){
-    const {x,y}=positions.get(node.id),rect=document.createElementNS(ns,'rect');
-    Object.entries({x,y,width:140,height:54,rx:7,fill:'#e8f0e8',stroke:'#cbdac7'}).forEach(([k,v])=>rect.setAttribute(k,v));svg.append(rect);
-    const label=document.createElementNS(ns,'text');label.setAttribute('x',x+70);label.setAttribute('y',y+30);label.setAttribute('text-anchor','middle');label.setAttribute('font-size','10');label.setAttribute('fill','#275f49');label.textContent=node.label.length>24?node.label.slice(0,22)+'…':node.label;
-    const title=document.createElementNS(ns,'title');title.textContent=node.label;rect.append(title);svg.append(label);
+  const svg=svgElement('svg',{viewBox:`0 0 620 ${Math.max(120,row*102+10)}`,role:'img','aria-label':showMastery?'Concept graph and estimated mastery':'Teaching visualization'});
+  const markerId='arrow-'+Math.random().toString(36).slice(2);
+  const defs=svgElement('defs'),marker=svgElement('marker',{id:markerId,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'});
+  marker.append(svgElement('path',{d:'M 0 0 L 10 5 L 0 10 Z',fill:'#9aaf92'}));defs.append(marker);svg.append(defs);
+  for(const edge of edges){const a=positions.get(edge.source),b=positions.get(edge.target);if(!a||!b)continue;
+    svg.append(svgElement('path',{d:`M ${a.x+140} ${a.y+66} C ${a.x+140} ${a.y+90}, ${b.x+140} ${b.y-22}, ${b.x+140} ${b.y}`,fill:'none',stroke:'#9aaf92','stroke-width':2,'marker-end':`url(#${markerId})`}));
+  }
+  for(const node of nodes){const p=positions.get(node.id),value=node.mastery;
+    const fill=node.active?'#fff1d9':(value!=null&&value>=(state.study?.mastery_target??.75))?'#e1efdf':'#f1f4ed';
+    const group=svgElement('g');group.append(svgElement('rect',{x:p.x,y:p.y,width:280,height:66,rx:8,fill,stroke:node.active?'#bd842c':'#cfdbc8','stroke-width':node.active?2:1}));
+    const full=node.label||node.id,title=svgElement('title');title.textContent=full;group.append(title);
+    const label=svgElement('text',{x:p.x+14,y:p.y+25,'font-size':13,fill:'#263d2e'});label.textContent=full.length>33?full.slice(0,31)+'…':full;group.append(label);
+    if(showMastery){const score=svgElement('text',{x:p.x+14,y:p.y+48,'font-size':11,fill:'#667b5c'});score.textContent=value==null?'Not assessed yet':`Estimated mastery: ${Math.round(value*100)}%`;group.append(score);}
+    svg.append(group);
   }
   return svg;
 }
-function addIntervention(message, restoring=false){
-  if(!restoring && message.proactive && state.localDirty)return;
-  const result=message.result,el=document.createElement('div');el.className='message tutor';
-  const label=document.createElement('div');label.className='label';label.textContent=(message.proactive?'A TIMELY NUDGE · ':'')+result.type.replaceAll('_',' ').toUpperCase();
-  const text=document.createElement('div');text.className='content';text.textContent=result.content;el.append(label,text);
-  if(result.type==='highlight'){
-    const btn=document.createElement('button');btn.className='quiet';btn.textContent='Show highlighted passage';btn.onclick=()=>applyHighlight(result.metadata);el.append(btn);
+function renderStudy(study){
+  const changed=state.currentProblem!==study.state.current_problem?.id;
+  state.study=study;renderObserver(study.state.observer_status);
+  $('concept').textContent=study.state.study_complete?'Material complete':study.state.current_concept;
+  const node=study.graph.nodes.find(n=>n.id===study.state.current_concept),value=node?.mastery;
+  $('mastery').textContent=value==null?'Estimated mastery: Not assessed yet':`Estimated mastery: ${Math.round(value*100)}%`;
+  $('mastery-bar').hidden=value==null;$('mastery-bar').value=value??0;
+  $('problem').textContent=study.state.study_complete?'Every concept has reached the current progression target. You can review your learning map or upload another material.':study.state.current_problem.prompt;
+  $('graph').replaceChildren(diagram(study.graph,true));
+  $('material-name').textContent=study.material.name;
+  if(changed){
+    $('assessment').textContent=state.currentProblem?'Previous answer was correct. Continue with the new question.':'';
+    clearTimeout(state.timer);state.currentProblem=study.state.current_problem.id;
+    $('workspace').value=study.state.workspace||'';state.lastText=$('workspace').value;state.dirty=false;
+    $('answer').value='';$('interventions').replaceChildren();$('highlight-preview').hidden=true;
+    state.pending=false;
   }
-  if(result.type==='visualization'){
-    el.append(renderDiagram(result.metadata));const ol=document.createElement('ol');ol.className='trace';
-    for(const step of result.metadata.steps||[]){const li=document.createElement('li');li.textContent=step;ol.append(li);}el.append(ol);
-    const references=document.createElement('div');references.className='source-ref';references.textContent=(result.metadata.edges||[]).map(e=>`${e.source} → ${e.target}`).join(' · ');el.append(references);
-  }
-  if(result.metadata.retrieved_sources?.length){const sources=document.createElement('div');sources.className='source-ref';sources.textContent='Retrieved context: '+[...new Set(result.metadata.retrieved_sources.map(s=>s.source))].join(', ');el.append(sources);}
-  if(message.proactive && !restoring){
-    const feedback=document.createElement('div');feedback.className='feedback';
-    for(const [rating,label] of [[1,'Helpful'],[-1,'Not helpful']]){const button=document.createElement('button');button.textContent=label;button.onclick=()=>{if(send({type:'feedback',rating,intervention_id:message.event_id})){feedback.replaceChildren(document.createTextNode('Feedback recorded.'));}};feedback.append(button);}el.append(feedback);
-  }
-  $('chat-log').append(el);if(message.plan)renderPlan(message.plan);scrollChat();
+  if(study.state.current_problem?.solved)state.pending=true;
+  $('status').textContent=study.state.study_complete?'Learning target reached':study.material.name;
+  if(!$('source-details').open)$('material-view').textContent=study.material.chunks[0]?.text||'';
+  updateControls();
 }
-function showAssessment(result){$('assessment').textContent=`${result.verified?(result.correct?'✓ Correct.':'Try again. '):'Provisional review: '}${result.reason}`;}
-function onMessage(event){
-  const m=JSON.parse(event.data);
-  if(m.type==='intervention')addIntervention(m);
-  if(m.type==='assessment')showAssessment(m.result);
-  if(m.type==='plan')renderPlan(m.plan);
-  if(m.type==='state')renderState(m.state);
-  if(m.type==='busy')$('busy').hidden=!m.active;
-  if(m.type==='error')notice(m.message);
-  if(m.type==='session_summary'){state.ended=true;addIntervention({result:{type:'explanation',content:m.result.summary+'\n\nNext goal: '+m.result.next_goal,metadata:{}}});notice('Session complete. Your learning summary has been saved.');}
+function markText(element,text,start,end){
+  const chars=Array.from(text),mark=document.createElement('mark');mark.textContent=chars.slice(start,end).join('');
+  element.replaceChildren(document.createTextNode(chars.slice(0,start).join('')),mark,document.createTextNode(chars.slice(end).join('')));
+}
+function showHighlight(m){
+  if(m.target==='workspace'){
+    const text=$('workspace').value;if(Array.from(text).slice(m.start,m.end).join('')!==m.quote)return;
+    $('highlight-preview').hidden=false;markText($('highlight-preview'),text,m.start,m.end);
+  }else{
+    const chunk=state.study.material.chunks.find(c=>c.id===m.source_id);if(!chunk)return;
+    $('source-details').open=true;markText($('material-view'),chunk.text,m.start,m.end);
+  }
+}
+function intervention(message){
+  if(message.proactive&&state.dirty)return;
+  const result=message.result,m=result.metadata||{},card=document.createElement('div');card.className='intervention';
+  const label=document.createElement('strong');label.textContent=result.type.replaceAll('_',' ');
+  const text=document.createElement('p');text.textContent=result.content;card.append(label,text);
+  if(result.type==='highlight')showHighlight(m);
+  if(result.type==='visualization'){
+    card.append(diagram(m));const list=document.createElement('ol');
+    for(const step of m.steps||[]){const li=document.createElement('li');li.textContent=step;list.append(li);}card.append(list);
+  }
+  $('interventions').append(card);
+}
+function handleMessage(event,generation){
+  if(generation!==state.generation)return;
+  const message=JSON.parse(event.data);
+  if(message.type==='observer_status')renderObserver(message);
+  if(message.type==='busy'&&!message.active){state.toolPending=false;updateControls();}
+  if(message.type==='error'){state.toolPending=false;}
+  if(message.type==='study_state')renderStudy(message);
+  if(message.type==='intervention')intervention(message);
+  if(message.type==='assessment'){
+    const r=message.result;$('assessment').textContent=`${r.correct?'Correct. Preparing your next question.':'Keep trying.'} ${r.reason}`;
+    state.pending=r.correct&&r.verified;updateControls();
+  }
+  if(message.type==='busy')$('busy').hidden=!message.active;
+  if(message.type==='error'){notice(message.message);state.pending=false;updateControls();}
 }
 function connect(){
-  const socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/${state.id}`);state.ws=socket;
-  socket.onopen=()=>{$('status').textContent=state.ended?'Session complete':'Connected';$('dot').style.background='#5d936c';};
-  socket.onmessage=onMessage;
-  socket.onclose=()=>{if(state.ws!==socket)return;$('status').textContent='Reconnecting';$('dot').style.background='#c8a068';state.reconnect=setTimeout(connect,2000);};
+  clearTimeout(state.reconnect);const generation=state.generation;
+  const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/${state.id}`);state.ws=ws;
+  ws.onmessage=e=>handleMessage(e,generation);
+  ws.onopen=async()=>{if(generation!==state.generation)return;try{
+    const view=await resumeStudy();if(generation!==state.generation)return;
+    renderStudy(view);flushEdits();
+  }catch(e){notice(e.message);}};
+  ws.onclose=()=>{if(generation!==state.generation||state.uploading)return;updateControls();$('observer-status').textContent='Observer: Disconnected';$('status').textContent='Reconnecting…';state.reconnect=setTimeout(connect,2000);};
 }
-async function startSession(fresh=false){
-  clearTimeout(state.reconnect);clearTimeout(state.editTimer);
-  if(state.ws){state.ws.onclose=null;state.ws.close();}
-  let session;
-  const stored=localStorage.getItem('studyroom-session');
-  if(!fresh && stored){try{session=await api(`/api/sessions/${Number(stored)}`);}catch{localStorage.removeItem('studyroom-session');}}
-  if(!session)session=await api('/api/sessions',{method:'POST'});
-  state.id=session.id;localStorage.setItem('studyroom-session',String(state.id));renderState(session.state);
-  $('chat-log').replaceChildren();
-  if(session.history?.length){for(const e of session.history){if(e.type==='student_message')addStudent(e.data.content);if(e.type==='intervention')addIntervention({result:e.data,proactive:e.data.proactive,event_id:e.id},true);if(e.type==='assessment')showAssessment(e.data);}}
-  else{const greeting=document.createElement('div');greeting.className='welcome';const title=document.createElement('h3');title.textContent='You do the thinking. I’ll help you along.';const text=document.createElement('p');text.textContent='Try the problem, ask a question, or choose a teaching tool below.';greeting.append(title,text);$('chat-log').append(greeting);}
-  connect();
+$('workspace').oninput=()=>{state.dirty=true;$('highlight-preview').hidden=true;clearTimeout(state.timer);state.timer=setTimeout(flushEdits,1000);};
+$('answer-form').onsubmit=e=>{
+  e.preventDefault();if(state.pending||!$('answer').value.trim()||!flushEdits())return;
+  if(send({type:'problem_attempt',content:$('answer').value,problem_id:state.currentProblem})){
+    notice('');state.pending=true;updateControls();
+  }
+};
+$('upload').onchange=async()=>{
+  const file=$('upload').files[0];if(!file||state.uploading)return;
+  state.uploading=true;state.generation++;clearTimeout(state.timer);clearTimeout(state.reconnect);
+  if(state.ws){state.ws.onclose=null;state.ws.close();state.ws=null;}
+  updateControls();notice('');$('status').textContent='Extracting concepts and building your learning map…';
+  try{
+    const form=new FormData();form.append('file',file);
+    const material=await api('/api/materials',{method:'POST',body:form});
+    $('status').textContent='Choosing your first question…';
+    const session=await api('/api/sessions',{method:'POST'});state.id=session.id;
+    const study=await api(`/api/sessions/${state.id}/study`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({material_id:material.id})});
+    state.pending=false;state.currentProblem=null;renderStudy(study);
+    localStorage.setItem('studyroom-auto-session',String(state.id));connect();
+  }catch(e){notice(e.message);$('status').textContent='Upload could not be completed';}
+  finally{state.uploading=false;$('upload').value='';updateControls();}
+};
+setInterval(()=>{
+  if(!document.hidden&&!state.uploading&&!state.study?.state.study_complete&&state.currentProblem&&state.ws?.readyState===WebSocket.OPEN)send({type:'student_action',action:'idle'});
+},20000);
+async function resumeStudy(){
+  const view=await api(`/api/sessions/${state.id}/study`);
+  if(view.state.current_problem?.solved&&!view.state.study_complete){
+    return api(`/api/sessions/${state.id}/study`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({material_id:view.state.material_id})});
+  }
+  return view;
 }
-function selectMaterial(id){state.selected=id;const record=state.materials.find(m=>m.id===id);$('material-view').textContent=record?.chunks.map(c=>c.text).join('\n\n')||'';document.querySelectorAll('#material-list button').forEach(b=>b.classList.toggle('selected',b.dataset.id===id));}
-async function loadMaterials(){state.materials=await api('/api/materials');$('material-count').textContent=state.materials.length;$('material-list').replaceChildren();for(const m of state.materials){const b=document.createElement('button');b.dataset.id=m.id;b.textContent='▤  '+m.name;b.onclick=()=>selectMaterial(m.id);$('material-list').append(b);}selectMaterial(state.selected||state.materials[0]?.id);}
-function ask(tool=null,content=null){flushEdits();const text=content||$('message').value.trim()||(tool?`Please use ${tool.replaceAll('_',' ')} to help with my current work.`:'');if(!text)return;if(send({type:'student_message',content:text,tool})){addStudent(text);$('message').value='';}}
-$('chat-form').onsubmit=e=>{e.preventDefault();ask();};
-$('message').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask();}};
-document.querySelectorAll('[data-tool]').forEach(button=>button.onclick=()=>ask(button.dataset.tool));
-$('request-hint').onclick=()=>ask('hint');
-$('check-work').onclick=()=>{flushEdits();send({type:'problem_attempt',content:$('workspace').value,problem_id:state.data.current_problem.id,assessment_mode:'reasoning'});};
-$('report-test').onclick=()=>{const report=window.prompt('Paste results from tests you ran in your own environment. These are recorded as unverified reports.');if(report?.trim()){flushEdits();send({type:'code_execution',content:report});notice('Test report recorded.');}};
-$('workspace').oninput=()=>{state.localDirty=true;$('highlight-preview').hidden=true;clearTimeout(state.editTimer);state.editTimer=setTimeout(flushEdits,1000);};
-$('workspace').onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){setTimeout(()=>{flushEdits();send({type:'student_action',action:'revert',content:$('workspace').value});},0);}};
-$('attempt-form').onsubmit=e=>{e.preventDefault();flushEdits();send({type:'problem_attempt',content:$('answer').value,problem_id:state.data.current_problem.id});};
-$('proactive').onchange=()=>send({type:'preferences',proactive_enabled:$('proactive').checked});
-$('new-session').onclick=()=>startSession(true).catch(e=>notice(e.message));
-$('end-session').onclick=()=>{flushEdits();if(send({type:'session_end'})){$('end-session').disabled=true;}};
-$('generate-problem').onclick=async()=>{flushEdits();$('generate-problem').disabled=true;try{await api(`/api/sessions/${state.id}/problem`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({concept:$('concept').value})});}catch(e){notice(e.message);}finally{$('generate-problem').disabled=false;}};
-$('upload').onchange=async()=>{const file=$('upload').files[0];if(!file)return;const data=new FormData();data.append('file',file);notice('Reading your material and extracting concepts…');try{await api('/api/materials',{method:'POST',body:data});await loadMaterials();notice('Material ready. Your tutor can now retrieve relevant passages.');}catch(e){notice(e.message);}finally{$('upload').value='';}};
-setInterval(()=>{if(!document.hidden && !state.ended && state.ws?.readyState===WebSocket.OPEN)send({type:'student_action',action:'idle'});},20000);
-async function init(){const health=await api('/api/health');if(health.demo_mode){$('tutor-mode').textContent='Offline demo · scripted teaching examples';$('tutor-mode').classList.add('notice-demo');}else if(!health.configured)notice('Add an OpenAI API key to enable tutoring, or run with DEMO_MODE=true.');await loadMaterials();await startSession();}
-init().catch(e=>notice(e.message));
+async function init(){
+  const saved=localStorage.getItem('studyroom-auto-session');if(!saved)return;
+  state.id=Number(saved);
+  const generation=state.generation;
+  try{const study=await resumeStudy();if(generation!==state.generation)return;renderStudy(study);connect();}
+  catch(e){notice(e.message);localStorage.removeItem('studyroom-auto-session');}
+}
+init();
+
+for(const tool of ['hint','explanation','highlight','visualization','guiding_question']){
+ const b=document.createElement('button');b.type='button';b.dataset.tool=tool;b.textContent=tool.replaceAll('_',' ');b.disabled=true;
+ b.onclick=()=>{if(b.disabled||!flushEdits())return;if(send({type:'student_action',action:'hint_request',tool})){state.toolPending=true;$('busy').textContent='Generating your requested '+b.textContent+'…';$('busy').hidden=false;updateControls();}};
+ $('manual-tools').append(b);
+}

@@ -2,44 +2,46 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Studyroom · Agentic AI Tutor</title>
+  <title>Studyroom</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="/">s<span>·</span> studyroom</a><span class="subtitle">A little guidance. Your own understanding.</span><div class="status"><i id="dot"></i><span id="status" role="status">Connecting</span></div><button id="new-session" class="quiet">New session ↗</button></header>
+  <header><strong>Studyroom</strong><span id="status" role="status">Upload material to begin</span>
+    <label class="upload">Upload material<input id="upload" type="file" accept=".pdf,.txt,.md" hidden></label>
+  </header>
+  <p id="notice" role="alert" hidden></p>
   <main>
-    <aside class="materials panel">
-      <div class="eyebrow">YOUR STUDY SPACE</div><h1>Make it<br>click.</h1><p class="muted intro">Read, try, reflect.<br>Your tutor follows your pace.</p>
-      <div class="section-label">LEARNING MATERIALS <span id="material-count">0</span></div>
-      <label class="upload" for="upload">＋ Add course material<small>PDF, TXT or Markdown · up to 8 MB</small></label><input type="file" id="upload" accept=".pdf,.txt,.md" hidden>
-      <div id="material-list"></div>
-      <div class="viewer-heading">SOURCE TEXT</div><div id="material-view" tabindex="0" aria-label="Learning material"></div>
-      <div class="preference"><input id="proactive" type="checkbox" checked><label for="proactive">Offer help when I get stuck</label></div>
-      <button id="end-session" class="quiet end">Finish &amp; reflect</button>
+    <section class="panel question-panel">
+      <p class="eyebrow">CURRENT TOPIC</p><h1 id="concept">Your next learning step</h1>
+      <div class="mastery"><span id="mastery">Estimated mastery: Not assessed yet</span>
+        <progress id="mastery-bar" max="1" value="0" aria-label="Estimated mastery" hidden></progress>
+      </div>
+      <p class="muted">An estimate from your answers, not a calibrated probability.</p>
+      <p id="problem" class="problem">Upload lecture notes. Your tutor will build a concept graph and choose the first question.</p>
+      <div role="status" id="observer-status">Observer: Not evaluated yet</div>
+      <details><summary>Observer details</summary><pre id="observer-details"></pre></details>
+      <form id="answer-form">
+        <label for="workspace">Your reasoning</label>
+        <textarea id="workspace" rows="8" placeholder="Work through the question here…" disabled></textarea>
+        <pre id="highlight-preview" hidden></pre>
+        <label for="answer">Your final answer</label>
+        <div class="answer-row"><input id="answer" autocomplete="off" placeholder="Follow the answer format in the question" disabled>
+          <button id="submit" type="submit" disabled>Submit answer</button></div>
+      </form>
+      <p>Request help now, regardless of the observer’s decision.</p>
+      <div id="manual-tools"></div>
+      <p id="assessment" aria-live="polite"></p>
+      <div id="interventions" role="log" aria-live="polite"></div>
+      <p id="busy" class="muted" hidden>Your tutor is working…</p>
+    </section>
+    <aside class="panel graph-panel">
+      <p class="eyebrow">YOUR LEARNING MAP</p><h2>Concept graph</h2>
+      <p class="muted">Arrows point from a prerequisite to the next concept.</p>
+      <div class="legend"><span>○ Not assessed</span><span class="active">● Current topic</span><span class="learned">● Target reached</span></div>
+      <div id="graph"><p class="muted">Your map will appear after processing.</p></div>
+      <details id="source-details"><summary id="material-name">Learning material</summary><pre id="material-view"></pre></details>
     </aside>
-    <section class="work panel">
-      <div class="workspace-top"><div><div class="eyebrow">CURRENT OBJECTIVE</div><h2 id="objective">Practice Binary Search</h2></div><span class="tag">WORKSPACE</span></div>
-      <div id="plan" class="plan"></div>
-      <div class="problem"><span class="eyebrow">THINK IT THROUGH</span><p id="problem"></p></div>
-      <label class="section-label" for="workspace">YOUR REASONING <span>Autosaved</span></label>
-      <textarea id="workspace" spellcheck="false" placeholder="Work through the problem here. Write your steps, pseudocode, or questions…"></textarea>
-      <pre id="highlight-preview" hidden></pre>
-      <div class="workspace-actions"><button id="check-work" class="quiet">Check reasoning</button><button id="request-hint" class="quiet">A small hint ↗</button><button id="report-test" class="quiet">Record test run</button></div>
-      <form id="attempt-form"><label for="answer" class="section-label">FINAL ANSWER</label><div class="answer-row"><input id="answer" placeholder="Enter your short answer" autocomplete="off"><button type="submit" class="primary">Check answer</button></div></form>
-      <div id="assessment" aria-live="polite"></div>
-      <div class="next-problem"><label class="section-label" for="concept">PRACTICE ANOTHER CONCEPT</label><div class="answer-row"><input id="concept" value="Binary Search"><button id="generate-problem" class="quiet">New problem →</button></div></div>
-      <p class="footnote">Code stays as text. Reasoning is reviewed; student code is never executed.</p>
-    </section>
-    <section class="chat panel">
-      <div class="chat-top"><div class="avatar">s·</div><div><h2>Your tutor</h2><p id="tutor-mode">Here when you need a nudge</p></div><span class="spark">✧</span></div>
-      <div id="chat-log" role="log" aria-live="polite"><div class="welcome"><span class="eyebrow">LET’S FIND THE NEXT STEP</span><h3>You do the thinking.<br>I’ll help you along.</h3><p>Ask a question or try the problem. You can request a clue, an explanation, or a different way to see it.</p></div></div>
-      <div id="busy" hidden>Thinking through your next step<span> · · ·</span></div>
-      <div class="tool-row" aria-label="Teaching tools"><button data-tool="hint">Hint</button><button data-tool="explanation">Explain</button><button data-tool="highlight">Highlight</button><button data-tool="visualization">Visualize</button><button data-tool="guiding_question">Ask me</button></div>
-      <form id="chat-form"><textarea id="message" rows="2" placeholder="What are you thinking about?" aria-label="Message your tutor"></textarea><button class="send" aria-label="Send message">↑</button></form>
-      <p class="chat-note">Small steps build lasting understanding.</p>
-    </section>
   </main>
-  <div id="notice" role="alert" hidden></div>
 </body>
 </html>

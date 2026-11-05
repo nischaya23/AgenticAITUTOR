@@ -17,8 +17,10 @@ def context_for(db, session_id: int, query: str = '') -> dict:
     return dict(concept=state['current_concept'], problem=public_problem,
         workspace=state.get('workspace', ''), plan=state.get('plan', {}),
         student={k: v for k, v in model.items() if k != 'policy'}, history=history,
-        knowledge=tools.retrieve_knowledge(f'{state["current_concept"]} {query[:1000]}'),
-        prerequisites=tools.get_prerequisites(db, state['current_concept']), query=query)
+        knowledge=tools.retrieve_knowledge(f'{state["current_concept"]} {query[:1000]}',
+                                           material_id=state.get('material_id')),
+        prerequisites=tools.get_prerequisites(db, state['current_concept'],
+                                             material_id=state.get('material_id')), query=query)
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):

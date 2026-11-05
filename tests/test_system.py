@@ -225,6 +225,7 @@ def test_validation_and_no_student_code_execution(app_env):
     client,factory,_=app_env
     sid=create(client)
     with client.websocket_connect(f'/ws/{sid}') as socket:
+        assert socket.receive_json()['type']=='observer_status'
         socket.send_json({'type':'problem_attempt','content':'1','problem_id':'old'})
         assert socket.receive_json()['type']=='error'
         socket.send_json({'type':'code_execution','content':'__import__("os").system("touch /tmp/should-not-exist")','correct':True})
