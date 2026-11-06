@@ -1,6 +1,17 @@
 const $ = id => document.getElementById(id);
-const state = {id:null, ws:null, study:null, lastText:'', dirty:false, pending:false,
-  uploading:false, timer:null, reconnect:null, generation:0, currentProblem:null};
+const state = {
+  id:null, 
+  ws:null, 
+  study:null, 
+  lastText:'',
+  dirty:false,
+  pending:false,
+  uploading:false, 
+  timer:null,
+  reconnect:null,
+  generation:0, 
+  currentProblem:null
+};
 
 function notice(message){$('notice').textContent=message;$('notice').hidden=!message;}
 async function api(path,options={}){
@@ -81,7 +92,7 @@ function renderStudy(study){
   $('graph').replaceChildren(diagram(study.graph,true));
   $('material-name').textContent=study.material.name;
   if(changed){
-    $('assessment').textContent=state.currentProblem?'Previous answer was correct. Continue with the new question.':'';
+    if(!state.currentProblem)$('assessment').textContent='';
     clearTimeout(state.timer);state.currentProblem=study.state.current_problem.id;
     $('workspace').value=study.state.workspace||'';state.lastText=$('workspace').value;state.dirty=false;
     $('answer').value='';$('interventions').replaceChildren();$('highlight-preview').hidden=true;
@@ -129,27 +140,40 @@ function intervention(message){
 function handleMessage(event,generation){
   if(generation!==state.generation)return;
   const message=JSON.parse(event.data);
+  if(message.type==='memory_activity')showMemoryActivity(message.items);
   if(message.type==='observer_status')renderObserver(message);
   if(message.type==='busy'&&!message.active){state.toolPending=false;updateControls();}
   if(message.type==='error'){state.toolPending=false;}
   if(message.type==='study_state')renderStudy(message);
   if(message.type==='intervention')intervention(message);
   if(message.type==='assessment'){
-    const r=message.result;$('assessment').textContent=`${r.correct?'Correct. Preparing your next question.':'Keep trying.'} ${r.reason}`;
-    state.pending=r.correct&&r.verified;updateControls();
+    const r=message.result;$('assessment').textContent=`${r.correct?'Correct.':'Not correct yet.'} ${r.reason}${r.correct&&(r.method==='llm'||r.verified)?' Preparing your next question.':''}`;
+    state.pending=r.correct&&(r.method==='llm'||r.verified);updateControls();
   }
   if(message.type==='busy')$('busy').hidden=!message.active;
   if(message.type==='error'){notice(message.message);state.pending=false;updateControls();}
 }
 function connect(){
   clearTimeout(state.reconnect);const generation=state.generation;
-  const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/${state.id}`);state.ws=ws;
+  const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/${state.id}`);
+  state.ws=ws;
   ws.onmessage=e=>handleMessage(e,generation);
-  ws.onopen=async()=>{if(generation!==state.generation)return;try{
-    const view=await resumeStudy();if(generation!==state.generation)return;
-    renderStudy(view);flushEdits();
-  }catch(e){notice(e.message);}};
-  ws.onclose=()=>{if(generation!==state.generation||state.uploading)return;updateControls();$('observer-status').textContent='Observer: Disconnected';$('status').textContent='Reconnecting…';state.reconnect=setTimeout(connect,2000);};
+  ws.onopen=async()=>{
+    if(generation!==state.generation)return;
+    try{
+      const view=await resumeStudy();
+      if(generation!==state.generation)return;
+      renderStudy(view);
+      flushEdits();
+    }catch(e){notice(e.message);}
+  };
+
+  ws.onclose=()=>{
+    if(generation!==state.generation||state.uploading)return;
+    updateControls();$('observer-status').textContent='Observer: Disconnected';
+    $('status').textContent='Reconnecting…';
+    state.reconnect=setTimeout(connect,2000);
+  };
 }
 $('workspace').oninput=()=>{state.dirty=true;$('highlight-preview').hidden=true;clearTimeout(state.timer);state.timer=setTimeout(flushEdits,1000);};
 $('answer-form').onsubmit=e=>{
@@ -160,6 +184,7 @@ $('answer-form').onsubmit=e=>{
 };
 $('upload').onchange=async()=>{
   const file=$('upload').files[0];if(!file||state.uploading)return;
+  $('memory-events').replaceChildren();$('memory-popup').hidden=true;
   state.uploading=true;state.generation++;clearTimeout(state.timer);clearTimeout(state.reconnect);
   if(state.ws){state.ws.onclose=null;state.ws.close();state.ws=null;}
   updateControls();notice('');$('status').textContent='Extracting concepts and building your learning map…';
@@ -186,11 +211,19 @@ async function resumeStudy(){
   return view;
 }
 async function init(){
-  const saved=localStorage.getItem('studyroom-auto-session');if(!saved)return;
+  const saved=localStorage.getItem('studyroom-auto-session');
+  if(!saved)return;
   state.id=Number(saved);
   const generation=state.generation;
-  try{const study=await resumeStudy();if(generation!==state.generation)return;renderStudy(study);connect();}
-  catch(e){notice(e.message);localStorage.removeItem('studyroom-auto-session');}
+  try{
+    const study=await resumeStudy();
+    if(generation!==state.generation)return;
+    renderStudy(study);
+    connect();
+  }
+  catch(e){
+    notice(e.message);
+    localStorage.removeItem('studyroom-auto-session');}
 }
 
 // CODE STARTS
@@ -229,3 +262,25 @@ function syncReasoningHighlight(){
 }
 $('workspace').addEventListener('scroll',syncReasoningHighlight);
 if(typeof ResizeObserver!=='undefined')new ResizeObserver(syncReasoningHighlight).observe($('workspace'));
+
+const memoryEventIds=new Set();
+function showMemoryActivity(items=[]){
+ for(const item of items){
+  if(memoryEventIds.has(item.id))continue;
+  memoryEventIds.add(item.id);
+  if(memoryEventIds.size>200)memoryEventIds.delete(memoryEventIds.values().next().value);
+  const row=document.createElement('p'),label=document.createElement('strong');
+  label.textContent=item.kind==='operation'?'Learning activity: ':item.kind==='reflection'?'Reflection: ':item.kind==='memory_update'?'Memory updated: ':'Memory retrieved: ';
+  if(item.sections){
+    const heading=document.createElement('strong');heading.textContent=item.operation||'Learning update';row.append(heading);
+    for(const [key,title] of [['short_term','Short term'],['long_term','Long term'],['reflection','Reflection']]){
+      const line=document.createElement('span'),name=document.createElement('strong');
+      line.style.display='block';name.textContent=title+': ';line.append(name,document.createTextNode(item.sections[key]||'No changes.'));row.append(line);
+    }
+  }else row.append(label,document.createTextNode(item.message));
+  $('memory-events').prepend(row);
+  while($('memory-events').children.length>30)$('memory-events').lastElementChild.remove();
+ }
+ if(items.length)$('memory-popup').hidden=false;
+}
+$('memory-dismiss').onclick=()=>{$('memory-popup').hidden=true;};

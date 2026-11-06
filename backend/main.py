@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field, ValidationError
 from sqlalchemy import select
-from . import config, knowledge, memory, observer, orchestrator, tools, utils
+from . import activity, config, knowledge, memory, observer, orchestrator, tools, utils
 from .db import Session, Event, Concept, ConceptEdge, SessionLocal, init_db, local_user, append_event
 
 SOCKETS: dict[int, set] = defaultdict(set)
@@ -170,7 +170,7 @@ def study_snapshot(db, session_id: int) -> dict:
     graph = material.get('graph')
     if not graph or not graph['concepts']:
         raise HTTPException(409, 'Upload the material again to build its study graph.')
-    mastery = memory.get_long_term_memory(db, row.user_id)['mastery']
+    mastery = memory.get_observer_memory(db, row.user_id)['mastery']
     return dict(type='study_state', state=public_state(state), material=material,
         graph={'nodes': [dict(id=name, label=name, mastery=mastery.get(name),
                               active=name == state.get('current_concept')) for name in graph['concepts']],
@@ -197,7 +197,7 @@ async def advance_study(session_id: int) -> dict | None:
         if state.get('ended'):
             return study_snapshot(db, session_id)
         material = knowledge.get_material(state['material_id'])
-        mastery = memory.get_long_term_memory(db, row.user_id)['mastery']
+        mastery = memory.get_observer_memory(db, row.user_id)['mastery']
         concept = select_study_concept(material['graph'], mastery)
         revision = state['revision']
         recent = state.get('recent_questions', [])
@@ -332,7 +332,7 @@ async def run_job(job: dict):
                 if progress:
                     await broadcast(sid, progress)
                 result = assessment_output['result']
-                if studying and result['correct'] and result['verified']:
+                if studying and result['correct'] and (result.get('method') == 'llm' or result['verified']):
                     following = await advance_study(sid)
                     if following:
                         await broadcast(sid, following)
@@ -347,12 +347,20 @@ async def run_job(job: dict):
             # API exception strings may contain request details; return a useful fixed message.
             message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else 'Tutor request failed. Check your API key, model, or server log and retry.'
             await broadcast(sid, {'type': 'error', 'message': message[:400]})
+            if job['kind'] == 'problem_attempt' or job['explicit'] or job['decision'] == 'WAKE':
+                await emit_activity(sid, [dict(id=f"{job['event_id']}:failed", call_id=job['event_id'], kind='operation',
+                    message='Learning call failed. No successful memory update or reflection is being reported.')])
         finally:
             with SessionLocal.begin() as db:
                 orchestrator.clear_pending_wake(db, sid)
             with SessionLocal() as db:
                 await broadcast(sid, {'type': 'observer_status', **observer_status(require_session(db, sid).state)})
             await broadcast(sid, {'type': 'busy', 'active': False})
+
+
+async def emit_activity(sid, items):
+    if items:
+        await broadcast(sid, {'type': 'memory_activity', 'items': items})
 
 
 @app.websocket('/ws/{session_id}')

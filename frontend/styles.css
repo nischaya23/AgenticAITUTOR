@@ -5,3 +5,5 @@
 .reasoning-editor #highlight-preview{position:absolute;top:1px;left:1px;margin:0;padding:13px;border:0;border-radius:6px;max-height:none;pointer-events:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;font-family:ui-monospace,monospace;font-size:13px;line-height:1.7;letter-spacing:normal;tab-size:4;color:#23372d}
 .reasoning-editor:has(#highlight-preview:not([hidden])) #workspace{color:transparent}
 .reasoning-editor mark{background:#fee2e2;color:#b91c1c;text-decoration:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px}
+
+.memory-popup{position:fixed;bottom:16px;right:16px;width:min(420px,calc(100vw - 32px));max-height:32vh;overflow:auto;background:white;border:1px solid #b7cbbb;border-radius:10px;padding:14px;box-shadow:0 6px 28px #183b2926;z-index:20;font-size:12px}.memory-popup-header{display:flex;align-items:center;justify-content:space-between;gap:12px}.memory-popup-header button{padding:5px 10px;font-size:11px}#memory-events p{line-height:1.5;border-top:1px solid #e2e8de;padding-top:8px}

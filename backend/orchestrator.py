@@ -1,7 +1,7 @@
 """Python routing with snapshot checks before committing teaching output."""
 from copy import deepcopy
 from sqlalchemy import select
-from . import assessment, config, knowledge, memory, observer, planner, reflection, student_model, tools, tutor, utils
+from . import activity, assessment, config, knowledge, memory, observer, planner, reflection, student_model, tools, tutor, utils
 from .db import Event, Session, append_event
 
 
@@ -12,7 +12,7 @@ def context_for(db, session_id: int, query: str = '') -> dict:
     public_problem = {k: v for k, v in problem.items() if k not in ('expected_answer', 'rubric')}
     history = memory.get_relevant_history(db, session_id)
     # Avoid sending policy matrices and the internal event stream to the model.
-    history = [e for e in history if e['type'] in ('student_message', 'problem_attempt', 'intervention', 'assessment')][-12:]
+    history = [e for e in history if e['type'] in ('student_message', 'problem_attempt', 'intervention', 'assessment', 'feedback')][-12:]
     model = student_model.get_student_model(db, row.user_id)
     return dict(concept=state['current_concept'], problem=public_problem,
         workspace=state.get('workspace', ''), plan=state.get('plan', {}),
@@ -24,14 +24,10 @@ def context_for(db, session_id: int, query: str = '') -> dict:
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):
-    model = memory.get_long_term_memory(db, row.user_id)
+    model = memory.get_observer_memory(db, row.user_id)
     policy = model['policy'] or observer.new_policy()
     if not model['policy']:
         memory.update_long_term_memory(db, row.user_id, {'policy': policy})
-    pending = state.get('observer', {}).get('pending_intervention') or state.get('observer', {}).get('pending_decision')
-    if pending and utils.now()-pending['at'] > 600:
-        append_event(db, row.id, 'reflection', {'intervention_id': pending.get('event_id'),
-            'reward': None, 'evidence': 'Outcome window expired; no reward assigned.'})
     action, o, features = observer.observe(state, kind, data,
         model['mastery'].get(state['current_concept'], .5), policy)
     state['observer'] = o
@@ -54,8 +50,10 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
         raise ValueError('A message cannot be empty.')
     if event.type == 'feedback':
         pending = state.get('observer', {}).get('pending_intervention')
-        if event.rating is None or not pending or event.intervention_id != pending['event_id']:
+        if event.rating is None or not pending or pending.get('feedback_received') or event.intervention_id != pending['event_id']:
             raise ValueError('Feedback must reference the currently pending intervention.')
+    if event.type == 'feedback':
+        state['observer']['pending_intervention']['feedback_received'] = True
     if event.type == 'preferences':
         if event.proactive_enabled is None:
             raise ValueError('Set proactive_enabled to true or false.')
@@ -70,7 +68,7 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
         pending = o.pop('pending_intervention', None) or o.pop('pending_decision', None)
         o.pop('pending_decision', None)
         if pending:
-            append_event(db, session_id, 'reflection', {'intervention_id': pending.get('event_id'),
+            append_event(db, session_id, 'intervention_closed', {'intervention_id': pending.get('event_id'),
                 'reward': None, 'evidence': 'New explicit help request censors the previous outcome window.'})
     if event.action in ('edit', 'revert'):
         state['workspace'] = event.content
@@ -80,10 +78,6 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
         state['ended'] = True
     received_at = utils.now()
     entry = append_event(db, session_id, event.type, {**data, 'revision': state['revision'], 'received_at': received_at})
-    reflection_result = None
-    if event.type == 'feedback':
-        reflection_result = reflection.reflect_on_intervention(db, session_id, row.user_id,
-                                                               state, data, entry.id)
     decision = persist_observation(db, row, state, event.type, data)
     return dict(event_id=entry.id, session_id=session_id, revision=state['revision'], explicit=explicit,
                 received_at=received_at,
@@ -91,7 +85,7 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
                 kind=event.type, content=event.content, decision=decision,
                 problem=deepcopy(state['current_problem']), concept=state['current_concept'],
                 assessment_mode=event.assessment_mode,
-                replan=bool(reflection_result and reflection_result['replan']))
+                replan=False)
 
 
 def clear_pending_wake(db, session_id: int):
@@ -174,9 +168,14 @@ async def handle(job: dict) -> list[dict]:
     outputs = []
     if job['kind'] == 'problem_attempt':
         with SessionLocal() as db:
-            context = context_for(db, sid)
+            context = context_for(db, sid, job['content'])
         result = await assessment.evaluate_attempt(job['problem'], job['content'], context,
                                                    job.get('assessment_mode') == 'reasoning')
+        try:
+            summary = await reflection.reflect_on_answer(context, result)
+        except Exception:
+            summary = None
+            activity.record('reflection', 'Reflection failed; assessment is still available and no reflection summary was saved.')
         with SessionLocal.begin() as db:
             row = db.get(Session, sid)
             state = deepcopy(row.state)
@@ -188,14 +187,30 @@ async def handle(job: dict) -> list[dict]:
                 student_model.update_mastery(db, row.user_id, job['concept'], result['score'], entry.id, result['verified'])
                 student_model.update_misconceptions(db, row.user_id, job['concept'],
                     assessment.diagnose_misconception(result), entry.id)
+            if summary and not already_solved:
+                model = memory.get_long_term_memory(db, row.user_id)
+                memory.update_long_term_memory(db, row.user_id, {'memories': model['memories'] + [summary['summary']],
+                    'learning_goals': [summary['next_goal']]})
+                append_event(db, sid, 'reflection', {**summary, 'scope': 'answer', 'tentative': not result['verified'], 'evidence_event_id': entry.id})
             evidence = {**result, 'observed_at': job['received_at']}
             outcome = reflection.reflect_on_intervention(db, sid, row.user_id, state, evidence, entry.id) if not already_solved else None
-            if result['verified'] and result['correct']:
+            if result['correct'] and (result.get('method') == 'llm' or result['verified']):
                 state['current_problem']['solved'] = True
             job['replan'] = bool(outcome and outcome['replan'])
             job['decision'] = persist_observation(db, row, state, 'assessment',
                 result if not already_solved else {**result, 'verified': False})
             job['revision'] = state['revision']
+            activity.record('short_term', 'Answer assessed: ' + ('correct.' if result['correct'] else 'incorrect; keep practicing this question.'))
+            if not already_solved:
+                updated = memory.get_long_term_memory(db, row.user_id)
+                mastery = updated['mastery'].get(job['concept'], .5)
+                detail = f"{job['concept']} mastery: {round(mastery*100)}%."
+                if result.get('misconceptions'):
+                    detail += ' Possible gap: ' + result['misconceptions'][0][:100]
+                if summary:
+                    detail += ' Goal: ' + summary['next_goal'][:100]
+                activity.record('long_term', detail)
+                activity.record('reflection_summary', summary['summary'][:180] if summary else 'Failed; no reflection saved.')
             outputs.append({'type': 'assessment', 'event_id': entry.id, 'result': result})
     if job['replan']:
         with SessionLocal() as db:
@@ -210,17 +225,8 @@ async def handle(job: dict) -> list[dict]:
                                              'trigger_event_id': job['event_id']})
                 outputs.append({'type': 'plan', 'plan': plan})
     if job['kind'] == 'session_end':
-        with SessionLocal() as db:
-            context = context_for(db, sid)
-        result = await reflection.reflect_on_session(context)
-        with SessionLocal.begin() as db:
-            row = db.get(Session, sid)
-            model = memory.get_long_term_memory(db, row.user_id)
-            append_event(db, sid, 'reflection', {**result, 'scope': 'session'})
-            memory.update_long_term_memory(db, row.user_id, {'memories': model['memories']+[result['summary']],
-                                                            'learning_goals': [result['next_goal']]})
-        outputs.append({'type': 'session_summary', 'result': result})
-    elif job['explicit'] or job['decision'] == 'WAKE':
+        outputs.append({'type': 'session_summary', 'result': {'summary': 'Session ended. Answer reflections were saved during grading.', 'next_goal': 'Resume your learning when ready.'}})
+    if job['kind'] != 'session_end' and (job['explicit'] or job['decision'] == 'WAKE'):
         try:
             result = await deliver_intervention(job, job['explicit'])
             if result:
@@ -229,3 +235,39 @@ async def handle(job: dict) -> list[dict]:
             with SessionLocal.begin() as db:
                 clear_pending_wake(db, sid)
     return outputs
+
+
+_original_deliver_intervention = deliver_intervention
+async def deliver_intervention(job, explicit):
+    items = []
+    token = activity.CURRENT.set(items)
+    try:
+        result = await _original_deliver_intervention(job, explicit)
+        if result:
+            result['activity'] = activity.group(job, job.get('requested') or 'Teaching tool', items)
+        return result
+    finally:
+        activity.CURRENT.reset(token)
+
+
+_original_handle = handle
+async def handle(job):
+    items = []
+    token = activity.CURRENT.set(items if job['kind'] == 'problem_attempt' else None)
+    try:
+        outputs = await _original_handle(job)
+        groups = []
+        for output in outputs:
+            group = output.pop('activity', None)
+            if group:
+                groups.append(group)
+        if job['kind'] == 'problem_attempt' and any(o['type'] == 'assessment' for o in outputs):
+            groups.insert(0, activity.group(job, 'Answer assessment', items))
+        if groups:
+            outputs.append({'type': 'memory_activity', 'items': groups})
+        return outputs
+    except Exception:
+        # No committed-update claims on failure.
+        raise
+    finally:
+        activity.CURRENT.reset(token)

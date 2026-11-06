@@ -147,3 +147,90 @@ def test_review_without_issues_still_validates():
     context = {'workspace': 'Reasoning here', 'knowledge': []}
     result = tools.reasoning_review(dict(content='No clear issues', concept='x', issues=[]), context)
     tools.validate_target(result, context)
+
+
+async def test_live_grading_calls_llm_even_for_exact_answer(monkeypatch):
+    from backend import assessment, config, utils
+    monkeypatch.setattr(config, 'DEMO_MODE', False)
+    mock = AsyncMock(return_value=assessment.Assessment(correct=True,score=1,
+        reason='Equivalent answer accepted.',misconceptions=[]))
+    monkeypatch.setattr(utils, 'call_llm', mock)
+    problem = dict(prompt='What is two plus two?',expected_answer='4',rubric='Accept four.')
+    context = dict(workspace='2+2', student={'memories':['Practicing arithmetic']},knowledge=[])
+    result = await assessment.evaluate_attempt(problem, 'four', context)
+    assert result['correct'] and result['method']=='llm'
+    assert result['verified'] is False
+    assert mock.call_args.args[1] == dict(problem=problem,answer='four',context=context)
+
+
+def test_memory_activity_records_operations_without_contents(app_env):
+    from backend import activity
+    client,factory,_=app_env
+    sid,_,_=prepare(client)
+    items=[]
+    token=activity.CURRENT.set(items)
+    try:
+        with factory.begin() as db:
+            row=db.get(Session,sid)
+            memory.get_short_term_memory(db,sid)
+            memory.get_long_term_memory(db,row.user_id)
+            memory.get_relevant_history(db,sid)
+            memory.update_long_term_memory(db,row.user_id,{'memories':['private learning detail']})
+    finally:
+        activity.CURRENT.reset(token)
+    assert any(i['kind']=='memory_read' for i in items)
+    assert any(i['kind']=='memory_update' for i in items)
+    assert 'private learning detail' not in str(items)
+
+
+def test_routine_events_do_not_emit_memory_activity(app_env):
+    client,_,_=app_env
+    sid,_,_=prepare(client)
+    with client.websocket_connect(f'/ws/{sid}') as socket:
+        assert socket.receive_json()['type']=='observer_status'
+        for action in ('edit','idle'):
+            socket.send_json({'type':'student_action','action':action,'content':'My reasoning'})
+            messages=[]
+            while True:
+                message=socket.receive_json()
+                messages.append(message)
+                if message['type']=='observer_status':
+                    break
+            assert all(m['type']!='memory_activity' for m in messages)
+
+
+async def test_grading_groups_activity_and_persists_reflection(app_env):
+    client,factory,_=app_env
+    sid,_,study=prepare(client)
+    from backend import utils
+    with factory.begin() as db:
+        job=orchestrator.ingest(db,sid,utils.ClientEvent(type='problem_attempt',content='1',
+            problem_id=study['state']['current_problem']['id']))
+    outputs=await orchestrator.handle(job)
+    activity=[o for o in outputs if o['type']=='memory_activity']
+    assert len(activity)==1
+    assert len(activity[0]['items'])==1
+    assert activity[0]['items'][0]['operation']=='Answer assessment'
+    with factory() as db:
+        model=memory.get_long_term_memory(db,db.get(Session,sid).user_id)
+        assert model['memories'] and model['learning_goals']
+
+
+@pytest.mark.parametrize('correct', [False, True])
+async def test_llm_decision_controls_next_question(app_env, monkeypatch, correct):
+    from backend import assessment, reflection, utils
+    client,factory,_=app_env
+    sid,_,study=prepare(client)
+    old=study['state']['current_problem']['id']
+    monkeypatch.setattr(assessment,'evaluate_attempt',AsyncMock(return_value=dict(
+        correct=correct,score=float(correct),reason='Model feedback.',misconceptions=[],verified=False,method='llm')))
+    monkeypatch.setattr(reflection,'reflect_on_answer',AsyncMock(return_value=dict(
+        summary='Practice interval boundaries.',next_goal='Check earlier matches.')))
+    with factory.begin() as db:
+        job=orchestrator.ingest(db,sid,utils.ClientEvent(type='problem_attempt',content='answer',problem_id=old))
+    await main.run_job(job)
+    with factory() as db:
+        state=db.get(Session,sid).state
+        assert (state['current_problem']['id']!=old)==correct
+        if not correct:
+            assert not state['current_problem'].get('solved')

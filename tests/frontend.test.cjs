@@ -22,7 +22,7 @@ async function setup(){
 test('minimal controls and graph with unassessed mastery',async()=>{
   const e=await setup();try{
     const d=e.w.document;
-    assert.equal(d.querySelectorAll('button').length,7);
+    assert.equal(d.querySelectorAll('button').length,8);
     assert.equal(d.querySelectorAll('[data-tool]').length,5);
     assert.equal(d.getElementById('problem').textContent,'Find the first 2.');
     assert.match(d.getElementById('mastery').textContent,/Not assessed yet/);
@@ -84,4 +84,28 @@ test('reasoning issues render inside the editor and clear on editing',async()=>{
     input.dispatchEvent(new e.w.Event('input'));
     assert.equal(preview.hidden,true);
   }finally{e.dom.window.close();}
+});
+
+test('memory activity popup renders safe summaries and can be dismissed',async()=>{
+ const e=await setup();try{
+  const d=e.w.document;
+  e.dispatch({type:'memory_activity',items:[{id:'read-1',kind:'memory_read',message:'<img src=x> Learning context retrieved.'},{id:'reflect-1',kind:'reflection',message:'Reflection deferred.'}]});
+  assert.equal(d.getElementById('memory-popup').hidden,false);
+  assert.equal(d.querySelectorAll('#memory-events p').length,2);
+  assert.equal(d.querySelectorAll('#memory-events img').length,0);
+  d.getElementById('memory-dismiss').click();
+  assert.equal(d.getElementById('memory-popup').hidden,true);
+ }finally{e.dom.window.close();}
+});
+
+test('incorrect LLM assessment keeps submission enabled and memory summaries use three short labels',async()=>{
+ const e=await setup();try{
+  const d=e.w.document;
+  e.dispatch({type:'assessment',result:{correct:false,verified:false,method:'llm',reason:'Recheck the boundary.'}});
+  assert.equal(d.getElementById('submit').disabled,false);
+  assert.doesNotMatch(d.getElementById('assessment').textContent,/Preparing your next question/);
+  e.dispatch({type:'memory_activity',items:[{id:'compact-1',kind:'operation',operation:'Answer assessment',sections:{short_term:'Incorrect; retry.',long_term:'Mastery: 48%.',reflection:'Check boundaries.'}}]});
+  const text=d.getElementById('memory-events').textContent;
+  for(const label of ['Short term:','Long term:','Reflection:'])assert.ok(text.includes(label));
+ }finally{e.dom.window.close();}
 });
