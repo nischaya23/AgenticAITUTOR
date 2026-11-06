@@ -11,8 +11,11 @@ async function api(path,options={}){
   return data;
 }
 function send(event){
-  if(state.ws?.readyState!==WebSocket.OPEN){notice('Connection interrupted. Reconnecting; your work remains here.');return false;}
-  state.ws.send(JSON.stringify(event));return true;
+  if(state.ws?.readyState!==WebSocket.OPEN){
+    notice('Connection interrupted. Reconnecting; your work remains here.');return false;
+  }
+  state.ws.send(JSON.stringify(event));
+  return true;
 }
 function flushEdits(){
   clearTimeout(state.timer);const text=$('workspace').value;
@@ -30,6 +33,7 @@ function updateControls(){
   const problem=state.study?.state.current_problem;
   const disabled=state.uploading||state.pending||!problem?.id||state.study?.state.study_complete||state.study?.state.ended;
   document.querySelectorAll('[data-tool]').forEach(b=>b.disabled=!!disabled||state.toolPending||state.ws?.readyState!==WebSocket.OPEN);
+  $('skip').disabled=!!disabled||state.toolPending||state.ws?.readyState!==WebSocket.OPEN;
   $('answer').disabled=!!disabled;$('submit').disabled=!!disabled;
   $('workspace').disabled=state.uploading||!problem?.id||!!state.study?.state.study_complete||!!state.study?.state.ended;
 }
@@ -93,9 +97,18 @@ function markText(element,text,start,end){
   element.replaceChildren(document.createTextNode(chars.slice(0,start).join('')),mark,document.createTextNode(chars.slice(end).join('')));
 }
 function showHighlight(m){
+  if(Array.isArray(m.issues)){
+    const lines=$('workspace').value.split(/\r?\n/);
+    if(m.issues.some(i=>lines[i.line-1]!==i.quote))return;
+    const preview=$('highlight-preview');preview.hidden=false;preview.replaceChildren();
+    lines.forEach((line,index)=>{const issue=m.issues.find(i=>i.line===index+1);const el=document.createElement(issue?'mark':'span');el.textContent=line+(index<lines.length-1?'\n':'');if(issue){el.className='reasoning-issue';el.title=issue.reason;}preview.append(el);});
+    preview.append(document.createTextNode('\n'));
+    syncReasoningHighlight();
+    return;
+  }
   if(m.target==='workspace'){
     const text=$('workspace').value;if(Array.from(text).slice(m.start,m.end).join('')!==m.quote)return;
-    $('highlight-preview').hidden=false;markText($('highlight-preview'),text,m.start,m.end);
+    $('highlight-preview').hidden=false;markText($('highlight-preview'),text,m.start,m.end);$('highlight-preview').append(document.createTextNode('\n'));syncReasoningHighlight();
   }else{
     const chunk=state.study.material.chunks.find(c=>c.id===m.source_id);if(!chunk)return;
     $('source-details').open=true;markText($('material-view'),chunk.text,m.start,m.end);
@@ -179,10 +192,40 @@ async function init(){
   try{const study=await resumeStudy();if(generation!==state.generation)return;renderStudy(study);connect();}
   catch(e){notice(e.message);localStorage.removeItem('studyroom-auto-session');}
 }
+
+// CODE STARTS
 init();
 
 for(const tool of ['hint','explanation','highlight','visualization','guiding_question']){
- const b=document.createElement('button');b.type='button';b.dataset.tool=tool;b.textContent=tool.replaceAll('_',' ');b.disabled=true;
- b.onclick=()=>{if(b.disabled||!flushEdits())return;if(send({type:'student_action',action:'hint_request',tool})){state.toolPending=true;$('busy').textContent='Generating your requested '+b.textContent+'…';$('busy').hidden=false;updateControls();}};
+ const b=document.createElement('button');
+ b.type='button';
+ b.dataset.tool=tool;
+ b.textContent=tool.replaceAll('_',' ');
+ b.disabled=true;
+ b.onclick=()=>{if(b.disabled||!flushEdits())
+                  return;
+                if(send({type:'student_action',action:'hint_request',tool})){
+                  state.toolPending=true;
+                  $('busy').textContent='Generating your requested '+b.textContent+'…';
+                  $('busy').hidden=false;
+                  updateControls();
+                }
+                };
  $('manual-tools').append(b);
 }
+
+$('skip').onclick=async()=>{
+ if($('skip').disabled||!flushEdits())return;
+ state.pending=true;updateControls();
+ try{const study=await api(`/api/sessions/${state.id}/skip`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({problem_id:state.currentProblem})});renderStudy(study);$('assessment').textContent='Question skipped. Mastery unchanged.';}
+ catch(e){notice(e.message);}finally{state.pending=false;updateControls();}
+};
+
+function syncReasoningHighlight(){
+ const input=$('workspace'),preview=$('highlight-preview');
+ preview.style.width=input.clientWidth+'px';
+ preview.style.height=input.clientHeight+'px';
+ preview.scrollTop=input.scrollTop;preview.scrollLeft=input.scrollLeft;
+}
+$('workspace').addEventListener('scroll',syncReasoningHighlight);
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(syncReasoningHighlight).observe($('workspace'));

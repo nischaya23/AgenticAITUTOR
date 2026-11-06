@@ -13,7 +13,18 @@ class TextArgs(utils.Schema):
     concept: str = Field(max_length=200)
 
 
+class ReasoningIssue(utils.Schema):
+    line: int = Field(ge=1)
+    quote: str = Field(min_length=1, max_length=2000)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ReasoningReviewArgs(TextArgs):
+    issues: list[ReasoningIssue] = Field(max_length=30)
+
+
 class HighlightArgs(TextArgs):
+    issues: list[ReasoningIssue] = Field(default_factory=list, max_length=30)
     target: Literal['workspace', 'material']
     source_id: str
     quote: str = Field(min_length=1, max_length=2000)
@@ -83,7 +94,8 @@ REGISTRY = {'hint': (TextArgs, hint), 'explanation': (TextArgs, explanation),
 
 
 def function_definition(name: str) -> dict:
-    definition = pydantic_function_tool(REGISTRY[name][0], name=name,
+    schema = ReasoningReviewArgs if name == 'highlight' else REGISTRY[name][0]
+    definition = pydantic_function_tool(schema, name=name,
         description=f'Display a {name.replace("_", " ")} to the student.')['function']
     return {'type': 'function', **definition}
 
@@ -105,9 +117,36 @@ def validate_target(result: dict, context: dict) -> dict:
         source = context['workspace']
     else:
         source = next((c['text'] for c in context['knowledge'] if c['id'] == m['source_id']), '')
+    for issue in m.get('issues', []):
+        lines = context['workspace'].splitlines()
+        if m['target'] != 'workspace' or issue['line'] > len(lines) or lines[issue['line']-1] != issue['quote']:
+            raise ValueError('Issue must match a current reasoning line exactly.')
     if not source or source[m['start']:m['end']] != m['quote']:
         raise ValueError('Highlight offsets must match the current source text exactly.')
     return result
+
+
+def reasoning_review(arguments: str | dict, context: dict) -> dict:
+    args = (ReasoningReviewArgs.model_validate_json(arguments) if isinstance(arguments, str)
+            else ReasoningReviewArgs.model_validate(arguments))
+    source = context['workspace']
+    lines = source.splitlines(keepends=True)
+    issues = []
+    for issue in args.issues:
+        # Resolve exact quotes rather than trusting model-generated character counts.
+        index = issue.line - 1
+        if index >= len(lines) or lines[index].rstrip('\r\n') != issue.quote:
+            matches = [i for i, line in enumerate(lines) if line.rstrip('\r\n') == issue.quote]
+            if len(matches) != 1:
+                raise ValueError('Reasoning changed or review line could not be located. Request a new review.')
+            index = matches[0]
+        issues.append({**issue.model_dump(), 'line': index + 1})
+    index = issues[0]['line'] - 1 if issues else 0
+    start = sum(len(line) for line in lines[:index])
+    quote = lines[index].rstrip('\r\n') if issues else source[:min(100, len(source))]
+    return highlight(dict(content=args.content, concept=args.concept, issues=issues,
+                          target='workspace', source_id='workspace', quote=quote,
+                          start=start, end=start+len(quote)))
 
 
 def retrieve_knowledge(query: str, material_id: str | None = None) -> list[dict]:

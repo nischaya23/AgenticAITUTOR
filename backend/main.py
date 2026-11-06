@@ -260,6 +260,28 @@ async def start_study(session_id: int, request: StudyRequest):
             raise HTTPException(400, str(exc)) from exc
 
 
+class SkipRequest(utils.Schema):
+    problem_id: str
+
+
+@app.post('/api/sessions/{session_id}/skip')
+async def skip_question(session_id: int, request: SkipRequest):
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        with SessionLocal() as db:
+            row = require_session(db, session_id)
+            if row.state.get('ended') or row.state.get('study_complete') or not row.state.get('material_id'):
+                raise HTTPException(409, 'No active study question to skip.')
+            if row.state['current_problem'].get('id') != request.problem_id:
+                raise HTTPException(409, 'Question changed. Try again.')
+        result = await advance_study(session_id)
+        if result is None:
+            raise HTTPException(409, 'Your work changed. Try skipping again.')
+        with SessionLocal.begin() as db:
+            append_event(db, session_id, 'question_skipped', {'problem_id': request.problem_id})
+        await broadcast(session_id, result)
+        return result
+
+
 @app.get('/api/sessions/{session_id}/study')
 def get_study(session_id: int):
     with SessionLocal() as db:

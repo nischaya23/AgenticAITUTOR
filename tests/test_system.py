@@ -56,6 +56,8 @@ async def test_all_five_tools_have_valid_outputs(app_env, kind):
     sid = create(client)
     with factory() as connection:
         context = orchestrator.context_for(connection, sid)
+    if kind == 'highlight':
+        context['workspace'] = 'Check the interval boundaries.'
     result = await tutor.execute_intervention({'action':kind,'strategy':'one step'}, context)
     assert result['type'] == kind
     assert result['content']

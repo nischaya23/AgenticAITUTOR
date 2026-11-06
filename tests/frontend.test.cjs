@@ -22,7 +22,7 @@ async function setup(){
 test('minimal controls and graph with unassessed mastery',async()=>{
   const e=await setup();try{
     const d=e.w.document;
-    assert.equal(d.querySelectorAll('button').length,6);
+    assert.equal(d.querySelectorAll('button').length,7);
     assert.equal(d.querySelectorAll('[data-tool]').length,5);
     assert.equal(d.getElementById('problem').textContent,'Find the first 2.');
     assert.match(d.getElementById('mastery').textContent,/Not assessed yet/);
@@ -68,5 +68,20 @@ test('unsafe content remains text and unsent edits suppress stale hints',async()
     d.getElementById('workspace').value='Changed';d.getElementById('workspace').dispatchEvent(new e.w.Event('input'));
     e.dispatch({type:'intervention',proactive:true,result:{type:'hint',content:'Stale',metadata:{}}});
     assert.equal(d.querySelectorAll('.intervention').length,1);
+  }finally{e.dom.window.close();}
+});
+
+test('reasoning issues render inside the editor and clear on editing',async()=>{
+  const e=await setup();try{
+    const d=e.w.document,input=d.getElementById('workspace');
+    input.value='Correct step\nWrong boundary';
+    e.dispatch({type:'intervention',result:{type:'highlight',content:'Check boundary.',metadata:{target:'workspace',issues:[{line:2,quote:'Wrong boundary',reason:'Check interval update.'}]}}});
+    const preview=d.getElementById('highlight-preview');
+    assert.equal(preview.parentElement,input.parentElement);
+    assert.equal(preview.querySelector('mark').textContent,'Wrong boundary');
+    assert.equal(input.value,'Correct step\nWrong boundary');
+    assert.equal(preview.hidden,false);
+    input.dispatchEvent(new e.w.Event('input'));
+    assert.equal(preview.hidden,true);
   }finally{e.dom.window.close();}
 });

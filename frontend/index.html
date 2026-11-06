@@ -23,14 +23,16 @@
       <details><summary>Observer details</summary><pre id="observer-details"></pre></details>
       <form id="answer-form">
         <label for="workspace">Your reasoning</label>
+        <div class="reasoning-editor">
+        <pre id="highlight-preview" aria-hidden="true" hidden></pre>
         <textarea id="workspace" rows="8" placeholder="Work through the question here…" disabled></textarea>
-        <pre id="highlight-preview" hidden></pre>
+        </div>
         <label for="answer">Your final answer</label>
         <div class="answer-row"><input id="answer" autocomplete="off" placeholder="Follow the answer format in the question" disabled>
           <button id="submit" type="submit" disabled>Submit answer</button></div>
       </form>
       <p>Request help now, regardless of the observer’s decision.</p>
-      <div id="manual-tools"></div>
+      <div id="manual-tools"></div><button id="skip" type="button" disabled>Skip question</button>
       <p id="assessment" aria-live="polite"></p>
       <div id="interventions" role="log" aria-live="polite"></div>
       <p id="busy" class="muted" hidden>Your tutor is working…</p>

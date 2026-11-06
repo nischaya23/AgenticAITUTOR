@@ -40,7 +40,7 @@ def test_all_interventions_materials_and_mobile(tmp_path):
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(base)
-            assert page.locator('button').count()==6
+            assert page.locator('button').count()==7
             page.locator('#upload').set_input_files({'name':'course.md','mimeType':'text/markdown',
                 'buffer':b'# Binary Search\nBinary search narrows a sorted interval.'})
             playwright.expect(page.locator('#workspace')).to_be_enabled()

@@ -112,3 +112,38 @@ def test_restarting_study_resumes_a_solved_question_without_duplicate_grading(ap
     assert resumed.status_code==200
     assert resumed.json()['state']['current_problem']['id']!=study['state']['current_problem']['id']
     assert resumed.json()['graph']['nodes'][0]['mastery'] is None
+
+
+def test_skip_changes_question_without_mastery_credit(app_env):
+    client,factory,_=app_env
+    sid,_,study=prepare(client)
+    old=study['state']['current_problem']['id']
+    response=client.post(f'/api/sessions/{sid}/skip',json={'problem_id':old})
+    assert response.status_code==200,response.text
+    assert response.json()['state']['current_problem']['id']!=old
+    assert response.json()['graph']['nodes'][0]['mastery'] is None
+    assert client.post(f'/api/sessions/{sid}/skip',json={'problem_id':old}).status_code==409
+
+
+def test_reasoning_issue_requires_exact_current_line():
+    result=tools.highlight(dict(content='Check this step',concept='Binary Search',target='workspace',
+        source_id='workspace',quote='wrong step',start=0,end=10,
+        issues=[dict(line=1,quote='wrong step',reason='Check the interval boundary.')]))
+    tools.validate_target(result,{'workspace':'wrong step','knowledge':[]})
+    with pytest.raises(ValueError):
+        tools.validate_target(result,{'workspace':'new step','knowledge':[]})
+
+
+def test_review_derives_unicode_offsets_and_resolves_unique_line():
+    context = {'workspace': '😀 first\nWrong boundary\nlast', 'knowledge': []}
+    result = tools.reasoning_review(dict(content='Check boundary', concept='Binary Search',
+        issues=[dict(line=1, quote='Wrong boundary', reason='Check the update.')]), context)
+    assert result['metadata']['start'] == len('😀 first\n')
+    assert result['metadata']['issues'][0]['line'] == 2
+    tools.validate_target(result, context)
+
+
+def test_review_without_issues_still_validates():
+    context = {'workspace': 'Reasoning here', 'knowledge': []}
+    result = tools.reasoning_review(dict(content='No clear issues', concept='x', issues=[]), context)
+    tools.validate_target(result, context)
