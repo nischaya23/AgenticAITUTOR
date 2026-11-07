@@ -62,10 +62,12 @@ async def test_all_five_tools_have_valid_outputs(app_env, kind):
     assert result['type'] == kind
     assert result['content']
     if kind == 'highlight':
-        assert result['metadata']['end'] > result['metadata']['start']
+        annotation = result['metadata']['annotations'][0]
+        assert annotation['end'] > annotation['start']
         tools.validate_target(result, context)
     if kind == 'visualization':
-        assert result['metadata']['nodes'] and result['metadata']['steps']
+        assert result['metadata']['visualization']['kind'] == 'binary_search'
+        assert result['metadata']['visualization']['steps']
     definition = tools.function_definition(kind)
     assert definition['strict'] and definition['parameters']['additionalProperties'] is False
 
@@ -203,7 +205,9 @@ async def test_feedback_is_linked_once_and_negative_outcome_replans(app_env):
         ingest(factory,sid,type='feedback',rating=1,intervention_id=999)
     job=ingest(factory,sid,type='feedback',rating=-1,intervention_id=output['event_id'])
     assert not job['replan']
-    await orchestrator.handle(job)
+    assert any(output['type'] == 'plan' for output in await orchestrator.handle(job))
+    with factory() as connection:
+        assert memory.get_long_term_memory(connection, db.local_user(connection).id)['policy']['updates'] == 1
     with pytest.raises(ValueError):
         ingest(factory,sid,type='feedback',rating=1,intervention_id=output['event_id'])
 
@@ -266,6 +270,7 @@ async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypat
     client,factory,_=app_env
     sid=create(client)
     monkeypatch.setattr(config,'DEMO_MODE',False)
+    monkeypatch.setattr(config,'LLM_PROVIDER','openai')
     usage=SimpleNamespace(input_tokens=80,output_tokens=20)
     async def parse(**kwargs):
         schema=kwargs['text_format']

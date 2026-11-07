@@ -1,13 +1,13 @@
 # Studyroom — Agentic AI Tutor
 
-A functional local MVP with FastAPI, a plain HTML/CSS/JavaScript interface,
+A local tutor with FastAPI, React, TypeScript, and Vite,
 six SQLite tables, OpenAI Responses API, and a conservative online LinUCB
 intervention policy. Python agent modules are small cooperating functions;
 there is no external agent framework.
 
 ## Run the offline demo
 
-Use Python 3.11 or newer. From this directory:
+Use Python 3.11 or newer and Node.js 20.19+ or 22.12+. From this directory:
 
 ```bash
 python -m venv .venv
@@ -19,12 +19,20 @@ cp .env.example .env
 Set `DEMO_MODE=true` in `.env`, then run:
 
 ```bash
+npm ci
+npm run build
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Open **http://127.0.0.1:8000**. On Windows, activate with
 `.venv\Scripts\Activate.ps1` and copy with `Copy-Item .env.example .env`.
-No Node.js runtime or frontend build is needed to run the application.
+FastAPI serves the production build from `frontend/dist`. For development,
+keep FastAPI running on port 8000 and run `npm run dev` in a second terminal.
+Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/ws` to FastAPI.
+
+To try the enhanced tools offline, upload Markdown with the heading
+`# Binary Search`. Enter a reasoning step and request **highlight** to see
+a scripted annotation. Request **visualization** to play the binary search trace.
 
 The offline demo has scripted Binary Search teaching, a practice problem,
 exact-answer grading, all five tool renderers, material ingestion/retrieval,
@@ -38,6 +46,7 @@ Edit `.env`:
 
 ```dotenv
 OPENAI_API_KEY=your_key_here
+LLM_PROVIDER=openai
 OPENAI_MODEL=gpt-4.1-mini
 DATABASE_URL=sqlite:///./tutor.db
 DEMO_MODE=false
@@ -75,12 +84,18 @@ agentic-tutor/
 │   ├── student_model.py    # Mastery and misconception hypotheses
 │   ├── knowledge.py        # PDF/TXT/MD ingestion, BM25, prerequisite graph
 │   ├── tools.py            # Five display tools and four internal tools
+│   ├── visualization.py    # Typed, validated visualization traces
 │   ├── db.py               # All six SQLAlchemy models
 │   └── utils.py            # Shared schemas, OpenAI helper, metrics
 ├── frontend/
 │   ├── index.html
 │   ├── styles.css
-│   └── app.js
+│   └── src/
+│       ├── main.tsx        # Study, chat, sessions, and WebSocket UI
+│       ├── Workspace.tsx   # CodeMirror and range decorations
+│       ├── Visualization.tsx # Playback and React Flow renderers
+│       ├── SceneCanvas.tsx # General-purpose Konva scenes
+│       └── types.ts
 ├── data/materials/         # Original materials + chunk/index JSON at runtime
 ├── tests/
 │   ├── conftest.py
@@ -89,9 +104,10 @@ agentic-tutor/
 │   ├── test_browser.py
 │   └── frontend.test.cjs
 ├── requirements.txt
-├── requirements-tested.txt
-├── package.json           # Optional frontend test dependencies only
+├── package.json           # Frontend dependencies and commands
 ├── package-lock.json
+├── tsconfig.json
+├── vite.config.ts
 ├── pytest.ini
 ├── .env.example
 ├── .gitignore
@@ -148,15 +164,16 @@ is queried with a bounded window instead of copied into memory JSON.
    session and checks its revision, current problem, preferences, and end state.
    Duplicate trigger IDs are rejected. Client-side unsent edits also suppress
    proactive cards. Highlight ranges must match the delivery-time source.
-6. Exact-answer attempts use the server-side reference. `Check reasoning`
-   requests provisional LLM review in live mode; it cannot create verified
-   progress or policy rewards. Repeating a solved problem does not inflate
-   mastery. `Record test run` records an unverified report from the student's
-   own environment; it never executes their code.
+6. Offline grading uses the server-side reference. Live grading uses the rubric,
+   student reasoning, and retrieved context. A correct live assessment can
+   advance the session. Only verified outcomes affect the Observer's failure
+   streak and outcome-based policy rewards. Repeating a solved problem does
+   not inflate mastery.
 7. A usable later outcome or linked feedback triggers deterministic Reflection.
    The session model, compact memory, and policy update in one transaction.
-   A negative outcome can trigger a revised plan. Session completion performs
-   one bounded synthesis call in live mode and saves a summary and next goal.
+   A negative outcome can trigger a revised plan. Answer reflection can save a
+   summary and next goal during grading. Ending a session returns a fixed
+   completion message.
 
 ## Teaching tools
 
@@ -164,15 +181,27 @@ is queried with a bounded window instead of copied into memory JSON.
 |---|---|
 | Hint | One small clue; live instructions forbid revealing the final answer |
 | Explanation | Concept explanation using retrieved context |
-| Highlight | Target, source ID, exact quote, Unicode start/end offsets |
-| Visualization | Validated nodes, directed edges, and ordered trace steps |
+| Highlight | Multiple categorized workspace annotations with an exact quote, line, reason, and server-resolved range |
+| Visualization | General-purpose animated scenes plus specialized search, traversal, and concept graph views |
 | Guiding Question | A question asking for independent reasoning |
 
-Highlighting marks the workspace preview or the selected material chunk.
-Visualizations render safe SVG elements plus trace steps; text labels and
-edge directions remain available as text. The UI never inserts model content
-using `innerHTML`. Retrieved source names are displayed as context, which
-does not claim every retrieved passage supports every model statement.
+The model supplies quotes and line numbers. Python resolves and revalidates
+the ranges against the workspace. CodeMirror displays decorations without
+editing the document. Students can dismiss each annotation or ask about it
+in tutor chat. New model annotations target the workspace.
+
+Live tutoring can visualize any subject as a general 2D scene. The model
+returns labeled shapes, arrows, and step-by-step changes to position, visibility,
+and emphasis. FastAPI validates the objects and changes, then React Konva renders
+them with the same playback controls as other step-based views. The visual
+language is limited to these primitives, while subjects and processes can vary
+with the study material. The browser loads Konva when a scene is first shown.
+
+The Binary Search demo uses Motion for React to animate the half-open interval
+and its pointers. React Flow renders concept graphs, trees, and graph traversals
+with pan, zoom, and draggable nodes. Step-based visuals provide previous, next,
+restart, play/pause, and speed controls. Model outputs contain structured data
+and text. All rendering logic lives in the application.
 
 The four internal functions are `retrieve_knowledge`, `get_prerequisites`,
 `verify_solution`, and `generate_problem`. No-intervention is a planner/policy
@@ -220,14 +249,14 @@ reviewable prerequisites are provided for Binary Search.
 python -m pytest -q
 ```
 
-Optional frontend DOM tests require Node.js 20 or newer:
+Frontend DOM tests build the app first:
 
 ```bash
 npm ci
 npm test
 ```
 
-Optional real-browser test:
+Optional real-browser test (run `npm run build` first):
 
 ```bash
 python -m pip install playwright
@@ -238,7 +267,7 @@ RUN_BROWSER_TESTS=1 python -m pytest -q tests/test_browser.py
 Set `BROWSER_EXECUTABLE` to use a particular installed Chromium binary.
 On PowerShell set `$env:RUN_BROWSER_TESTS='1'` before running pytest.
 
-Optional **paid** OpenAI smoke test:
+Optional **paid** OpenAI smoke tests for structured output and both enhanced tools:
 
 ```bash
 RUN_OPENAI_INTEGRATION=1 python -m pytest -q tests/test_openai_integration.py

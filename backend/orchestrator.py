@@ -135,6 +135,8 @@ async def deliver_intervention(job: dict, explicit: bool) -> dict | None:
             clear_pending_wake(db, sid)
             return None
         # Workspace highlight offsets must match delivery-time text even for explicit requests.
+        if result['type'] == 'highlight' and current.get('workspace', '') != context['workspace']:
+            raise ValueError('Reasoning changed during review. Request a new review.')
         tools.validate_target(result, {**context, 'workspace': current.get('workspace', '')})
         append_event(db, sid, 'tool_call', {'name': result['type'], 'trigger_event_id': job['event_id'],
                                            'result': result})
@@ -158,7 +160,7 @@ async def deliver_intervention(job: dict, explicit: bool) -> dict | None:
         utils.METRICS['interventions'] += 1
         utils.METRICS['proactive_interventions' if not explicit else 'explicit_interventions'] += 1
         return {'type': 'intervention', 'event_id': entry.id, 'proactive': not explicit,
-                'result': result, 'plan': plan}
+                'result': result, 'plan': plan, 'revision': current['revision']}
 
 
 async def handle(job: dict) -> list[dict]:
@@ -166,6 +168,17 @@ async def handle(job: dict) -> list[dict]:
     from .db import SessionLocal
     sid = job['session_id']
     outputs = []
+    if job['kind'] == 'feedback':
+        with SessionLocal.begin() as db:
+            row = db.get(Session, sid)
+            state = deepcopy(row.state)
+            entry = db.get(Event, job['event_id'])
+            pending = state.get('observer', {}).get('pending_intervention')
+            if pending and pending['event_id'] == entry.data['intervention_id']:
+                outcome = reflection.reflect_on_intervention(db, sid, row.user_id, state,
+                    {'rating': entry.data['rating'], 'observed_at': job['received_at']}, entry.id)
+                memory.update_short_term_memory(db, sid, state)
+                job['replan'] = bool(outcome and outcome['replan'])
     if job['kind'] == 'problem_attempt':
         with SessionLocal() as db:
             context = context_for(db, sid, job['content'])

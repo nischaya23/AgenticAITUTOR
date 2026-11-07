@@ -137,9 +137,9 @@ def test_reasoning_issue_requires_exact_current_line():
 def test_review_derives_unicode_offsets_and_resolves_unique_line():
     context = {'workspace': '😀 first\nWrong boundary\nlast', 'knowledge': []}
     result = tools.reasoning_review(dict(content='Check boundary', concept='Binary Search',
-        issues=[dict(line=1, quote='Wrong boundary', reason='Check the update.')]), context)
-    assert result['metadata']['start'] == len('😀 first\n')
-    assert result['metadata']['issues'][0]['line'] == 2
+        issues=[dict(line=1, quote='Wrong boundary', reason='Check the update.', category='possible_error')]), context)
+    assert result['metadata']['annotations'][0]['start'] == len('😀 first\n')
+    assert result['metadata']['annotations'][0]['line'] == 2
     tools.validate_target(result, context)
 
 

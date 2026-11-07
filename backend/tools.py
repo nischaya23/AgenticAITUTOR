@@ -6,6 +6,7 @@ from typing import Literal
 from openai import pydantic_function_tool
 from pydantic import Field
 from . import config, knowledge, utils
+from .visualization import GeminiSceneRequest, Scene, VisualizationRequest
 
 
 class TextArgs(utils.Schema):
@@ -19,8 +20,13 @@ class ReasoningIssue(utils.Schema):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class Annotation(ReasoningIssue):
+    category: Literal['possible_error', 'important_concept', 'missing_justification',
+                      'reconsider', 'explanation_needed']
+
+
 class ReasoningReviewArgs(TextArgs):
-    issues: list[ReasoningIssue] = Field(max_length=30)
+    issues: list[Annotation] = Field(max_length=15)
 
 
 class HighlightArgs(TextArgs):
@@ -94,15 +100,24 @@ REGISTRY = {'hint': (TextArgs, hint), 'explanation': (TextArgs, explanation),
 
 
 def function_definition(name: str) -> dict:
-    schema = ReasoningReviewArgs if name == 'highlight' else REGISTRY[name][0]
+    visual_schema = GeminiSceneRequest if config.LLM_PROVIDER == 'gemini' else VisualizationRequest
+    schema = {'highlight': ReasoningReviewArgs, 'visualization': visual_schema}.get(name, REGISTRY[name][0])
+    descriptions = {
+        'highlight': 'Annotate exact workspace excerpts with their 1-based line and category.',
+        'visualization': 'Animate any topic as a general 2D scene, or use a specialized search or graph view when it fits.',
+    }
     definition = pydantic_function_tool(schema, name=name,
-        description=f'Display a {name.replace("_", " ")} to the student.')['function']
+        description=descriptions.get(name, f'Display a {name.replace("_", " ")} to the student.'))['function']
     return {'type': 'function', **definition}
 
 
-async def invoke_registered_tool(name: str, arguments: str | dict) -> dict:
+async def invoke_registered_tool(name: str, arguments: str | dict, context: dict | None = None) -> dict:
     if name not in REGISTRY:
         raise ValueError('Unknown intervention tool.')
+    if context is not None and name == 'highlight':
+        return reasoning_review(arguments, context)
+    if context is not None and name == 'visualization':
+        return interactive_visualization(arguments, gemini=config.LLM_PROVIDER == 'gemini' and not config.DEMO_MODE)
     schema, function = REGISTRY[name]
     args = schema.model_validate_json(arguments) if isinstance(arguments, str) else schema.model_validate(arguments)
     async with asyncio.timeout(3):
@@ -117,6 +132,14 @@ def validate_target(result: dict, context: dict) -> dict:
         source = context['workspace']
     else:
         source = next((c['text'] for c in context['knowledge'] if c['id'] == m['source_id']), '')
+    for issue in m.get('annotations', []):
+        lines = source.split('\n')
+        if (m['target'] != 'workspace' or issue['line'] > len(lines)
+                or issue['quote'] not in lines[issue['line'] - 1]
+                or source[issue['start']:issue['end']] != issue['quote']):
+            raise ValueError('Annotation must match the current reasoning exactly.')
+    if 'annotations' in m:
+        return result
     for issue in m.get('issues', []):
         lines = context['workspace'].splitlines()
         if m['target'] != 'workspace' or issue['line'] > len(lines) or lines[issue['line']-1] != issue['quote']:
@@ -127,26 +150,39 @@ def validate_target(result: dict, context: dict) -> dict:
 
 
 def reasoning_review(arguments: str | dict, context: dict) -> dict:
-    args = (ReasoningReviewArgs.model_validate_json(arguments) if isinstance(arguments, str)
-            else ReasoningReviewArgs.model_validate(arguments))
+    raw = json.loads(arguments) if isinstance(arguments, str) else arguments
+    args = ReasoningReviewArgs.model_validate(raw)
     source = context['workspace']
-    lines = source.splitlines(keepends=True)
-    issues = []
+    lines = source.split('\n')
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line) + 1)
+    annotations = []
     for issue in args.issues:
-        # Resolve exact quotes rather than trusting model-generated character counts.
         index = issue.line - 1
-        if index >= len(lines) or lines[index].rstrip('\r\n') != issue.quote:
-            matches = [i for i, line in enumerate(lines) if line.rstrip('\r\n') == issue.quote]
+        quote = issue.quote
+        if '\n' in quote or '\r' in quote or not quote.strip():
+            raise ValueError('Annotation quote must contain text from one line.')
+        if index >= len(lines) or quote not in lines[index]:
+            matches = [i for i, line in enumerate(lines) if quote in line]
             if len(matches) != 1:
                 raise ValueError('Reasoning changed or review line could not be located. Request a new review.')
             index = matches[0]
-        issues.append({**issue.model_dump(), 'line': index + 1})
-    index = issues[0]['line'] - 1 if issues else 0
-    start = sum(len(line) for line in lines[:index])
-    quote = lines[index].rstrip('\r\n') if issues else source[:min(100, len(source))]
-    return highlight(dict(content=args.content, concept=args.concept, issues=issues,
-                          target='workspace', source_id='workspace', quote=quote,
-                          start=start, end=start+len(quote)))
+        first = lines[index].find(quote)
+        if first != lines[index].rfind(quote):
+            raise ValueError('Annotation quote is ambiguous within the selected line.')
+        start = offsets[index] + first
+        annotations.append({**issue.model_dump(), 'line': index + 1, 'start': start, 'end': start + len(quote)})
+    return ToolResult(type='highlight', content=args.content, metadata=dict(
+        concept=args.concept, target='workspace', source_id='workspace', annotations=annotations)).model_dump()
+
+
+def interactive_visualization(arguments: str | dict, *, gemini: bool = False) -> dict:
+    schema = GeminiSceneRequest if gemini else VisualizationRequest
+    args = schema.model_validate_json(arguments) if isinstance(arguments, str) else schema.model_validate(arguments)
+    visual = Scene.model_validate_json(args.scene_json) if isinstance(args, GeminiSceneRequest) else args.visualization
+    return ToolResult(type='visualization', content=args.content,
+                      metadata={'concept': args.concept, 'visualization': visual.model_dump()}).model_dump()
 
 
 def retrieve_knowledge(query: str, material_id: str | None = None) -> list[dict]:

@@ -1,6 +1,27 @@
 {
-  "name": "agentic-tutor-checks",
+  "name": "studyroom",
   "private": true,
-  "scripts": {"test": "node --test tests/frontend.test.cjs"},
-  "devDependencies": {"jsdom": "^26.1.0"}
+  "scripts": {
+    "test": "npm run build && node --experimental-vm-modules --test tests/frontend.test.cjs",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.7"
+  },
+  "dependencies": {
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@xyflow/react": "^12.12.1",
+    "codemirror": "^6.0.2",
+    "konva": "^10.9.1",
+    "motion": "^14.10.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-konva": "^19.3.2"
+  }
 }

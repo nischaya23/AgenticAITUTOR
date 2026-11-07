@@ -1,53 +1,12 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Studyroom</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header><strong>Studyroom</strong><span id="status" role="status">Upload material to begin</span>
-    <label class="upload">Upload material<input id="upload" type="file" accept=".pdf,.txt,.md" hidden></label>
-  </header>
-  <p id="notice" role="alert" hidden></p>
-  <main>
-    <section class="panel question-panel">
-      <p class="eyebrow">CURRENT TOPIC</p><h1 id="concept">Your next learning step</h1>
-      <div class="mastery"><span id="mastery">Estimated mastery: Not assessed yet</span>
-        <progress id="mastery-bar" max="1" value="0" aria-label="Estimated mastery" hidden></progress>
-      </div>
-      <p class="muted">An estimate from your answers, not a calibrated probability.</p>
-      <p id="problem" class="problem">Upload lecture notes. Your tutor will build a concept graph and choose the first question.</p>
-      <div role="status" id="observer-status">Observer: Not evaluated yet</div>
-      <details><summary>Observer details</summary><pre id="observer-details"></pre></details>
-      <form id="answer-form">
-        <label for="workspace">Your reasoning</label>
-        <div class="reasoning-editor">
-        <pre id="highlight-preview" aria-hidden="true" hidden></pre>
-        <textarea id="workspace" rows="8" placeholder="Work through the question here…" disabled></textarea>
-        </div>
-        <label for="answer">Your final answer</label>
-        <div class="answer-row"><input id="answer" autocomplete="off" placeholder="Follow the answer format in the question" disabled>
-          <button id="submit" type="submit" disabled>Submit answer</button></div>
-      </form>
-      <p>Request help now, regardless of the observer’s decision.</p>
-      <div id="manual-tools"></div><button id="skip" type="button" disabled>Skip question</button>
-      <p id="assessment" aria-live="polite"></p>
-      <div id="interventions" role="log" aria-live="polite"></div>
-      <p id="busy" class="muted" hidden>Your tutor is working…</p>
-    </section>
-    <aside class="panel graph-panel">
-      <p class="eyebrow">YOUR LEARNING MAP</p><h2>Concept graph</h2>
-      <p class="muted">Arrows point from a prerequisite to the next concept.</p>
-      <div class="legend"><span>○ Not assessed</span><span class="active">● Current topic</span><span class="learned">● Target reached</span></div>
-      <div id="graph"><p class="muted">Your map will appear after processing.</p></div>
-      <details id="source-details"><summary id="material-name">Learning material</summary><pre id="material-view"></pre></details>
-    </aside>
-  </main>
-  <aside id="memory-popup" class="memory-popup" hidden aria-label="Memory and reflection activity">
-    <div class="memory-popup-header"><strong>Memory &amp; reflection</strong><button id="memory-dismiss" type="button" aria-label="Dismiss activity popup">Close</button></div>
-    <div id="memory-events" role="log" aria-live="polite"></div>
-  </aside>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

@@ -54,13 +54,13 @@ class StudentData(BaseModel):
 
 @lru_cache
 def get_client() -> AsyncOpenAI:
-    if not config.OPENAI_API_KEY:
-        raise RuntimeError('Add OPENAI_API_KEY to .env, or set DEMO_MODE=true for the offline demo.')
     if config.LLM_PROVIDER == "gemini":
         if not config.GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY is missing.")
 
         return AsyncOpenAI(api_key=config.GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", timeout=config.API_TIMEOUT, max_retries=2,)
+    if not config.OPENAI_API_KEY:
+        raise RuntimeError('Add OPENAI_API_KEY to .env, or set DEMO_MODE=true for the offline demo.')
     return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=config.API_TIMEOUT, max_retries=2)
 
 
@@ -72,6 +72,7 @@ async def call_llm(
     model: str | None = None,
     schema: type[BaseModel] | None = None,
     operation: str | None = None,
+    max_output_tokens: int | None = None,
     **kwargs,
 ):
     """Support OpenAI Responses and Gemini-compatible Chat Completions."""
@@ -105,6 +106,7 @@ async def call_llm(
 
         timeout = config.API_TIMEOUT * 3 + 5
         wants_tools = bool(kwargs.get("tools"))
+        output_budget = max_output_tokens if max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
         if schema is not None and wants_tools:
             raise ValueError(
@@ -117,7 +119,7 @@ async def call_llm(
                 model=selected_model,
                 instructions=instructions,
                 input=payload,
-                max_output_tokens=config.MAX_OUTPUT_TOKENS,
+                max_output_tokens=output_budget,
                 store=False,
                 **kwargs,
             )
@@ -157,7 +159,7 @@ async def call_llm(
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": payload},
             ],
-            max_tokens=config.MAX_OUTPUT_TOKENS,
+            max_tokens=output_budget,
             **extra,
         )
 

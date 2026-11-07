@@ -8,6 +8,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import select
 from . import activity, config, knowledge, memory, observer, orchestrator, tools, utils
@@ -38,12 +39,17 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Agentic AI Tutor', lifespan=lifespan)
-app.mount('/static', StaticFiles(directory=config.ROOT / 'frontend'), name='static')
+FRONTEND_BUILD = config.ROOT / 'frontend' / 'dist'
+app.mount('/assets', StaticFiles(directory=FRONTEND_BUILD / 'assets', check_dir=False), name='assets')
 
 
 def observer_status(state):
-    status = dict(state.get('observer', {}).get('status') or {})
+    observation = state.get('observer', {})
+    status = dict(observation.get('status') or {})
     status['revision'] = state.get('revision', 0)
+    pending = observation.get('pending_intervention')
+    status['feedback_intervention_id'] = (pending['event_id'] if pending
+        and not pending.get('feedback_received') and utils.now() - pending['at'] <= 600 else None)
     if state.get('ended') or state.get('study_complete'):
         status.update(decision='INACTIVE', reason='Session ended or learning target reached')
     return status
@@ -64,12 +70,16 @@ def require_session(db, session_id: int):
 
 @app.get('/')
 def frontend():
-    return FileResponse(config.ROOT / 'frontend' / 'index.html')
+    index = FRONTEND_BUILD / 'index.html'
+    if not index.is_file():
+        raise HTTPException(503, 'Build the frontend with npm ci and npm run build, or use the Vite dev server.')
+    return FileResponse(index)
 
 
 @app.get('/api/health')
 def health():
-    return {'status': 'ok', 'demo_mode': config.DEMO_MODE, 'configured': bool(config.OPENAI_API_KEY)}
+    key = config.GEMINI_API_KEY if config.LLM_PROVIDER == 'gemini' else config.OPENAI_API_KEY
+    return {'status': 'ok', 'demo_mode': config.DEMO_MODE, 'configured': bool(key)}
 
 
 @app.post('/api/sessions')
@@ -343,9 +353,26 @@ async def run_job(job: dict):
             raise
         except Exception as exc:
             utils.METRICS['job_errors'] += 1
-            LOG.warning('Tutor job failed (%s)', type(exc).__name__)
             # API exception strings may contain request details; return a useful fixed message.
-            message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else 'Tutor request failed. Check your API key, model, or server log and retry.'
+            if isinstance(exc, APIStatusError):
+                status = exc.status_code
+                LOG.warning('Tutor provider request failed (%s, HTTP %s)', type(exc).__name__, status)
+                detail = {
+                    400: 'The provider rejected the request. Check model and tool compatibility.',
+                    401: 'The provider rejected the credentials. Check the configured API key.',
+                    403: 'The provider denied access. Check the API key and model permissions.',
+                    404: 'The requested model or endpoint was unavailable. Check the provider settings.',
+                    429: 'The provider rate or quota limit was reached. Try again later.',
+                }.get(status, 'The provider could not complete the request. Try again.')
+                message = f'{config.LLM_PROVIDER.title()} (HTTP {status}): {detail}'
+            else:
+                LOG.warning('Tutor job failed (%s)', type(exc).__name__)
+                if isinstance(exc, (APITimeoutError, TimeoutError)):
+                    message = 'The model provider took too long to respond. Try again.'
+                elif isinstance(exc, APIConnectionError):
+                    message = 'The server could not connect to the model provider. Check the connection and try again.'
+                else:
+                    message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else 'Tutor request failed. Check the server log and retry.'
             await broadcast(sid, {'type': 'error', 'message': message[:400]})
             if job['kind'] == 'problem_attempt' or job['explicit'] or job['decision'] == 'WAKE':
                 await emit_activity(sid, [dict(id=f"{job['event_id']}:failed", call_id=job['event_id'], kind='operation',
@@ -390,11 +417,14 @@ async def websocket(socket: WebSocket, session_id: int):
                     raise ValueError('Please wait for queued tutor requests to finish.')
                 with SessionLocal.begin() as db:
                     job = orchestrator.ingest(db, session_id, event)
-                await socket.send_json({'type': 'ack', 'event_id': job['event_id'],
-                                        'decision': job['decision'], 'revision': job['revision']})
+                ack = {'type': 'ack', 'event_id': job['event_id'], 'event_type': job['kind'],
+                       'action': event.action, 'decision': job['decision'], 'revision': job['revision']}
+                if event.type == 'student_message':
+                    ack['content'] = event.content
+                await socket.send_json(ack)
                 with SessionLocal() as db:
                     await broadcast(session_id, {'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
-                if job['explicit'] or job['decision'] == 'WAKE' or job['kind'] in ('problem_attempt', 'session_end') or job['replan']:
+                if job['explicit'] or job['decision'] == 'WAKE' or job['kind'] in ('problem_attempt', 'session_end', 'feedback'):
                     task = asyncio.create_task(run_job(job))
                     TASKS[session_id].add(task)
                     task.add_done_callback(TASKS[session_id].discard)
