@@ -2,9 +2,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import numpy as np
 import pytest
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 from backend import config, db, knowledge, main, memory, observer, orchestrator, planner, reflection, tools, tutor, utils

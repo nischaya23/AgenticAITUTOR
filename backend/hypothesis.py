@@ -7,7 +7,7 @@ import asyncio
 from copy import deepcopy
 from typing import Literal
 from pydantic import Field
-from . import config, memory, prompts, utils
+from . import config, prompts, utils
 from .db import Session
 from .response import content_key, has_content, response_for
 from .logging_setup import event as log_event

@@ -7,7 +7,7 @@ from collections import Counter
 from functools import lru_cache
 from typing import Literal
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from . import config, prompts, logging_setup as logs
 from .response import Schema, Response
 
@@ -59,11 +59,6 @@ def normalize_mastery(values) -> dict[str, float]:
 class StudentData(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mastery: dict[str, float] = Field(default_factory=dict)
-
-    @field_validator('mastery', mode='before')
-    @classmethod
-    def _legacy_mastery(cls, value):
-        return normalize_mastery(value)
     misconceptions: list[dict[str, JsonValue]] = Field(default_factory=list)
     memories: list[str] = Field(default_factory=list)
     learning_goals: list[str] = Field(default_factory=list)

@@ -56,6 +56,8 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
   const [observer, setObserver] = useState<Observer>({});
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [topic, setTopic] = useState('');
+  const [progressMessage, setProgressMessage] = useState('');
   const [connected, setConnected] = useState(false);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -317,14 +319,29 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
     };
   }, [sid, uploading]);
 
-  async function upload(file: File) {
+  function upload(files: File[]) {
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    void begin('Building one learning graph from your materials…',
+      () => api<{ id: string }>('/api/materials', { method: 'POST', body: form }));
+  }
+
+  function studyTopic(event: FormEvent) {
+    event.preventDefault();
+    const value = topic.trim();
+    if (value.length < 2) return;
+    void begin('Searching the web for “' + value + '” and building your learning graph…',
+      () => post<{ id: string }>('/api/materials/web', { topic: value }));
+  }
+
+  async function begin(message: string, makeMaterial: () => Promise<{ id: string }>) {
     setUploading(true);
+    setProgressMessage(message);
     setConnected(false);
     setNotice('');
     try {
-      const form = new FormData();
-      form.append('file', file);
-      const material = await api<{ id: string }>('/api/materials', { method: 'POST', body: form });
+      const material = await makeMaterial();
+      setTopic('');
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
       setHistory([]);
@@ -376,15 +393,21 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
 
   return <MotionConfig reducedMotion="user">
     <header><strong>Studyroom</strong><span id="status" role="status">
-      {uploading ? 'Preparing your learning plan and first question…' : study?.state.study_complete ? 'Learning target reached'
+      {uploading ? progressMessage : study?.state.study_complete ? 'Learning target reached'
         : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
-        : study?.material.name ?? 'Upload material to begin'}
-    </span><label className="upload">Upload material<input id="upload" type="file" accept=".pdf,.txt,.md"
+        : study?.material.name ?? 'Upload material or search a topic to begin'}
+    </span><label className="upload" title="Select one or more PDF, TXT or Markdown files (up to 10)">Upload materials
+      <input id="upload" type="file" accept=".pdf,.txt,.md" multiple
       disabled={uploading} onChange={event => {
-        const file = event.target.files?.[0];
+        const files = Array.from(event.target.files ?? []);
         event.target.value = '';
-        if (file) void upload(file);
+        if (files.length) upload(files);
       }} /></label>
+      <form className="web-topic" role="search" onSubmit={studyTopic}>
+        <input id="web-topic" type="search" placeholder="Or study a topic from the web…" aria-label="Topic to study from the web"
+          value={topic} maxLength={200} disabled={uploading} onChange={event => setTopic(event.target.value)} />
+        <button id="web-search" type="submit" disabled={uploading || topic.trim().length < 2}>Search web</button>
+      </form>
       <div className="account-controls"><span>{user.email}</span><button type="button"
         disabled={uploading || pending || busy} onClick={async () => {
           try {
@@ -402,7 +425,7 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
           {mastery != null && <progress max={1} value={mastery} aria-label="Estimated mastery" />}</div>
         <p className="muted">An estimate from your answers.</p>
         <p id="problem" className="problem">{study?.state.study_complete ? 'Every concept has reached the current progression target.'
-          : problem?.prompt ?? 'Upload lecture notes to build a concept graph and get your first question.'}</p>
+          : problem?.prompt ?? 'Upload lecture notes or search the web for a topic to build a concept graph and get your first question.'}</p>
         <div id="observer-status" role="status">Observer: {observer.decision ?? 'Waiting'} · {observer.reason ?? 'Waiting for activity'}</div>
         <details><summary>Observer details</summary><pre>{JSON.stringify(observer, null, 2)}</pre></details>
         {sid && study && <LearningPlanPanel key={sid + ':' + study.material.id} sessionId={sid}
@@ -493,6 +516,11 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
           masteryTarget={study.mastery_target} label="Concept graph and estimated mastery" />
           : <p className="muted">Your map will appear after processing.</p>}</div>
         {study && <details><summary id="material-name">{study.material.name}</summary>
+          {study.material.web_sources?.length ? <ul id="material-sources" className="muted">
+            {study.material.web_sources.map(link => <li key={link.url}><a href={link.url} target="_blank"
+              rel="noopener noreferrer">{link.title}</a>{link.concept ? ' (looked up for ' + link.concept + ')' : ''}</li>)}</ul>
+            : (study.material.sources?.length ?? 0) > 1 && <ul id="material-sources" className="muted">
+            {study.material.sources!.map(source => <li key={source}>{source}</li>)}</ul>}
           <pre>{study.material.chunks[0]?.text}</pre></details>}
       </aside>
     </main>

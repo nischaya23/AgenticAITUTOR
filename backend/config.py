@@ -25,6 +25,11 @@ HYPOTHESIS_INTERVAL_SECONDS = 30
 BANDIT_WARMUP = int(os.getenv('BANDIT_WARMUP', '12'))
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 MAX_UPLOAD_FILES = 10
+# Web search: "free" (Wikipedia + DuckDuckGo, no key), "gemini" (Google Search grounding), or "off".
+WEB_SEARCH_PROVIDER = os.getenv('WEB_SEARCH_PROVIDER', 'free').lower()
+WEB_SEARCH_MAX_PAGES = int(os.getenv('WEB_SEARCH_MAX_PAGES', '4'))
+WEB_SEARCH_TIMEOUT = float(os.getenv('WEB_SEARCH_TIMEOUT', '15'))
+WEB_SEARCH_CONTACT = os.getenv('WEB_SEARCH_CONTACT', 'https://github.com/nischaya23/AgenticAITUTOR')
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")

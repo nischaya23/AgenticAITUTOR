@@ -45,30 +45,52 @@ def material_title(names: list[str]) -> str:
         return ' + '.join(names)
     return f'{names[0]} + {len(names) - 1} more'
 
-def save_material(filename: str, content: bytes, text: str, graph: dict | None=None) -> dict:
-    return save_materials([(filename, content, text)], graph)
-
-def save_materials(documents: list[tuple[str, bytes, str]], graph: dict | None=None) -> dict:
-    """Store one or more documents as a single material with a shared concept graph."""
-    if not documents:
-        raise ValueError('Upload at least one file.')
+def save_materials(documents: list[tuple], graph: dict | None=None, extra: dict | None=None) -> dict:
+    """Store (filename, bytes, text[, url]) documents as one material with a shared concept graph."""
     directory = config.DATA_DIR / 'materials'
     directory.mkdir(parents=True, exist_ok=True)
     material_id = uuid.uuid4().hex
     chunks, names = [], []
-    for index, (filename, content, text) in enumerate(documents):
+    for index, document in enumerate(documents):
+        filename, content, text = document[:3]
+        url = document[3] if len(document) > 3 else None
         name = Path(filename).name
         names.append(name)
         suffix = Path(filename).suffix.lower()
+        suffix = suffix if suffix in ('.pdf', '.txt', '.md') else '.txt'
         stored = f'{material_id}{suffix}' if len(documents) == 1 else f'{material_id}-{index}{suffix}'
         (directory / stored).write_bytes(content)
-        chunks.extend(dict(id=f'{material_id}:{len(chunks) + j}', source=name, text=text[start:start + 1400])
-                      for j, start in enumerate(range(0, len(text), 1100)))
+        chunks.extend(make_chunks(material_id, len(chunks), name, text, url))
     record = dict(id=material_id, name=material_title(names), sources=names, chunks=chunks, graph=graph)
+    record.update(extra or {})
     temporary = directory / f'{material_id}.tmp'
     temporary.write_text(json.dumps(record), encoding='utf-8')
     temporary.replace(directory / f'{material_id}.json')
     return record
+
+def make_chunks(prefix: str, start_index: int, source: str, text: str, url: str | None=None) -> list[dict]:
+    extra = {'url': url} if url else {}
+    return [dict(id=f'{prefix}:{start_index + j}', source=source, text=text[start:start + 1400], **extra)
+            for j, start in enumerate(range(0, len(text), 1100))]
+
+def add_web_documents(material_id: str, documents: list[dict], concept: str) -> list[dict]:
+    """Append agent web lookups to a material so later retrieval reuses them."""
+    path = config.DATA_DIR / 'materials' / f'{material_id}.json'
+    record = json.loads(path.read_text(encoding='utf-8'))
+    known = {s.get('url') for s in record.get('web_sources', [])}
+    added = []
+    for doc in documents:
+        if doc['url'] in known:
+            continue
+        added.extend(make_chunks(material_id, len(record['chunks']) + len(added), doc['title'], doc['text'][:12000], doc['url']))
+        record.setdefault('web_sources', []).append(dict(title=doc['title'], url=doc['url'], concept=concept))
+        known.add(doc['url'])
+    record['chunks'].extend(added)
+    record.setdefault('web_lookups', []).append(concept)
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(record), encoding='utf-8')
+    temporary.replace(path)
+    return added
 
 def list_materials(user_id: int | None = None) -> list[dict]:
     directory = config.DATA_DIR / 'materials'
@@ -115,8 +137,7 @@ def extraction_input(documents: list[tuple[str, str]]) -> str:
     sections = (f'### Document {i}: {name}\n{text[:share]}' for i, (name, text) in enumerate(documents, 1))
     return '\n\n'.join(sections)
 
-async def extract_concepts(text: str | list[tuple[str, str]]) -> ConceptGraph:
-    documents = [('material', text)] if isinstance(text, str) else text
+async def extract_concepts(documents: list[tuple[str, str]]) -> ConceptGraph:
     instructions = prompts.EXTRACT_CONCEPTS if len(documents) == 1 else prompts.EXTRACT_CONCEPTS_MULTI
     return await utils.call_llm(instructions, extraction_input(documents), schema=ConceptGraph, operation='EXTRACT_CONCEPTS')
 

@@ -6,7 +6,6 @@ from uuid import uuid4
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +13,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import delete, select
 from . import logging_setup as logs
-from . import auth, hypothesis, plans, activity, config, knowledge, memory, observer, orchestrator, tools, utils
+from . import auth, websearch, hypothesis, plans, config, knowledge, memory, orchestrator, tools, utils
 from .response import Response, response_for
 from .db import Session, Event, Concept, Login, Material, SessionLocal, init_db, append_event
 
@@ -287,26 +286,85 @@ async def _new_problem(session_id: int, request: ProblemRequest):
 @app.get('/api/materials')
 async def materials(request: Request):
     records = await asyncio.to_thread(knowledge.list_materials, request.state.user_id)
-    return [{'id': m['id'], 'name': m['name'], 'chunks': m['chunks']} for m in records]
+    return [{'id': m['id'], 'name': m['name'], 'sources': m.get('sources', [m['name']]),
+             'origin': m.get('origin', 'upload'), 'web_sources': m.get('web_sources', []), 'chunks': m['chunks']} for m in records]
 
 
 @app.post('/api/materials')
-async def upload_material(request: Request, file: UploadFile = File(...)):
-    content = await file.read(config.MAX_UPLOAD_BYTES + 1)
-    if len(content) > config.MAX_UPLOAD_BYTES:
-        raise HTTPException(413, 'Upload limit is 8 MiB.')
-    name = Path(file.filename or 'material.txt').name
+async def upload_material(request: Request, file: UploadFile | None = File(None),
+                          files: list[UploadFile] | None = File(None)):
+    """Build one concept graph from a single file or from several selected files."""
+    uploads = ([file] if file else []) + list(files or [])
+    if not uploads:
+        raise HTTPException(400, 'Upload at least one file.')
+    if len(uploads) > config.MAX_UPLOAD_FILES:
+        raise HTTPException(400, f'Upload at most {config.MAX_UPLOAD_FILES} files at once.')
+    documents, total = [], 0
     try:
-        text = await asyncio.to_thread(knowledge.extract_text, name, content)
-        graph = await knowledge.extract_concepts(text)
-        with SessionLocal.begin() as db:
-            graph = knowledge.store_graph(db, graph, isolated=True)
-        record = await asyncio.to_thread(knowledge.save_material, name, content, text, graph.model_dump())
-        with SessionLocal.begin() as db:
-            db.add(Material(id=record['id'], user_id=request.state.user_id))
+        for upload in uploads:
+            content = await upload.read(config.MAX_UPLOAD_BYTES + 1)
+            name = Path(upload.filename or 'material.txt').name
+            if len(content) > config.MAX_UPLOAD_BYTES:
+                raise HTTPException(413, f'{name}: the upload limit is 8 MiB per file.')
+            try:
+                text = await asyncio.to_thread(knowledge.extract_text, name, content)
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError(f'{name}: {exc}' if len(uploads) > 1 else str(exc)) from exc
+            total += len(text)
+            if total > 600000:
+                raise ValueError('Selected materials are too long together; choose fewer or smaller files.')
+            documents.append((name, content, text))
+        return await build_material(request.state.user_id, documents)
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {'id': record['id'], 'name': record['name'], 'concepts': graph.model_dump()}
+
+
+async def build_material(user_id: int, documents: list[tuple], extra: dict | None = None) -> dict:
+    """Extract one concept graph from (name, bytes, text[, url]) documents and save it for the user."""
+    graph = await knowledge.extract_concepts([(document[0], document[2]) for document in documents])
+    with SessionLocal.begin() as db:
+        graph = knowledge.store_graph(db, graph, isolated=True)
+    record = await asyncio.to_thread(knowledge.save_materials, documents, graph.model_dump(), extra)
+    with SessionLocal.begin() as db:
+        db.add(Material(id=record['id'], user_id=user_id))
+    return {'id': record['id'], 'name': record['name'], 'sources': record['sources'],
+            'web_sources': record.get('web_sources', []), 'concepts': graph.model_dump()}
+
+
+class WebTopicRequest(utils.Schema):
+    topic: str = Field(min_length=2, max_length=200)
+
+
+@app.post('/api/materials/web')
+async def web_material(request: Request, body: WebTopicRequest):
+    """Study a topic without uploads: search the web and build the concept graph from the pages found."""
+    topic = ' '.join(body.topic.split())
+    try:
+        pages = await websearch.search(topic)
+        documents = [(page['title'], page['text'].encode('utf-8'), page['text'], page['url']) for page in pages]
+        links = [dict(title=page['title'], url=page['url']) for page in pages if page['url']]
+        links += [link for page in pages for link in page.get('links', []) if link['url']]
+        return await build_material(request.state.user_id, documents,
+            {'name': f'Web: {topic}', 'origin': 'web', 'topic': topic, 'web_sources': links})
+    except (ValueError, RuntimeError, UnicodeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+async def study_sources(material: dict, concept: str) -> list[dict]:
+    """Material passages for a concept; the agent searches the web once per concept when none match."""
+    sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, material['id'])
+    if sources or not websearch.enabled() or concept in material.get('web_lookups', []):
+        return sources or material['chunks'][:3]
+    query = f"{concept} {material['topic']}" if material.get('topic') and material['topic'].lower() not in concept.lower() else concept
+    try:
+        pages = await websearch.search(query, max_pages=2)
+        added = await asyncio.to_thread(knowledge.add_web_documents, material['id'], pages, concept)
+        logs.event('agent.web_lookup', concept=concept, pages=len(pages), chunks=len(added))
+    except (websearch.WebSearchError, OSError, ValueError) as exc:
+        logs.event('agent.web_lookup_failed', concept=concept, error=type(exc).__name__)
+        return material['chunks'][:3]
+    sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, material['id'])
+    return sources or added[:3] or material['chunks'][:3]
 
 
 MASTERY_TARGET = .75  # A progression heuristic, not a calibrated probability.
@@ -361,8 +419,7 @@ async def advance_study(session_id: int) -> dict | None:
                 return None
             memory.update_short_term_memory(db, session_id, {'study_complete': True})
             return study_snapshot(db, session_id)
-    sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, state['material_id'])
-    sources = sources or material['chunks'][:3]
+    sources = await study_sources(material, concept)
     problem = await tools.generate_problem(concept, sources=sources, previous_prompts=recent, plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
         hypotheses=hypothesis.eligible(state), hypothesis_version=state.get('hypothesis_state', {}).get('version', 0),
         eligible_concepts=eligible, recent_formats=state.get('recent_formats', []))

@@ -2,7 +2,7 @@
 from typing import Literal
 from pydantic import Field, StringConstraints
 from typing import Annotated
-from . import prompts, config, utils
+from . import prompts, utils
 
 class Plan(utils.Schema):
     objective: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
