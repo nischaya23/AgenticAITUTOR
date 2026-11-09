@@ -1,7 +1,7 @@
-"""Exactly six tables. SQLite transactions stay short and never span an await."""
+"""SQLite models and additive migrations for existing local databases."""
 from datetime import datetime, timezone
 from sqlalchemy import (JSON, DateTime, ForeignKey, Index, Integer, String,
-                        create_engine, event, select)
+                        create_engine, event, inspect)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from . import config
 
@@ -18,6 +18,20 @@ class User(Base):
     __tablename__ = 'users'
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class Login(Base):
+    __tablename__ = 'logins'
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    expires_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
+class Material(Base):
+    __tablename__ = 'materials'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
 
 
 class Session(Base):
@@ -73,6 +87,9 @@ def init_db():
     Base.metadata.create_all(engine)
     # DB-level append-only guarantees also cover direct SQL, not just ORM use.
     with engine.begin() as connection:
+        columns = {column['name'] for column in inspect(connection).get_columns('users')}
+        if 'password_hash' not in columns:
+            connection.exec_driver_sql('ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)')
         for operation in ('UPDATE', 'DELETE'):
             connection.exec_driver_sql(f'''CREATE TRIGGER IF NOT EXISTS events_no_{operation.lower()}
                 BEFORE {operation} ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END''')
@@ -85,12 +102,3 @@ def append_event(db, session_id: int, kind: str, data: dict) -> Event:
     db.add(entry)
     db.flush()
     return entry
-
-
-def local_user(db) -> User:
-    user = db.scalar(select(User).where(User.email == 'student@local.test'))
-    if not user:
-        user = User(email='student@local.test')
-        db.add(user)
-        db.flush()
-    return user

@@ -158,11 +158,11 @@ def interactive_visualization(arguments: str | dict, *, gemini: bool=False) -> d
     visual = Scene.model_validate_json(args.scene_json) if isinstance(args, GeminiSceneRequest) else args.visualization
     return ToolResult(type='visualization', content=args.content, metadata={'concept': args.concept, 'visualization': visual.model_dump()}).model_dump()
 
-def retrieve_knowledge(query: str, material_id: str | None=None) -> list[dict]:
-    return knowledge.retrieve_knowledge(query, material_id=material_id)
+def retrieve_knowledge(query: str, material_id: str | None=None, user_id: int | None=None) -> list[dict]:
+    return knowledge.retrieve_knowledge(query, material_id=material_id, user_id=user_id)
 
-def get_prerequisites(db, concept: str, material_id: str | None=None) -> list[str]:
-    return knowledge.get_prerequisites(db, concept, material_id=material_id)
+def get_prerequisites(db, concept: str, material_id: str | None=None, user_id: int | None=None) -> list[str]:
+    return knowledge.get_prerequisites(db, concept, material_id=material_id, user_id=user_id)
 
 class Problem(utils.Schema):
     prompt: str

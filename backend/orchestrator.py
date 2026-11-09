@@ -22,9 +22,9 @@ def context_for(db, session_id: int, query: str = '') -> dict:
         hypotheses=hypothesis.eligible(state), plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
         student={k: v for k, v in model.items() if k != 'policy'}, history=history,
         knowledge=tools.retrieve_knowledge(f'{state["current_concept"]} {query[:1000]}',
-                                           material_id=state.get('material_id')),
+                                           material_id=state.get('material_id'), user_id=row.user_id),
         prerequisites=tools.get_prerequisites(db, state['current_concept'],
-                                             material_id=state.get('material_id')), query=query)
+                                             material_id=state.get('material_id'), user_id=row.user_id), query=query)
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):

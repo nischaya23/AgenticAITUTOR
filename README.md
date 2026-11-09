@@ -1,7 +1,7 @@
 # Studyroom — Agentic AI Tutor
 
 A local tutor with FastAPI, React, TypeScript, and Vite,
-six SQLite tables, OpenAI Responses API, and a conservative online LinUCB
+SQLite, email/password accounts, OpenAI Responses API, and a conservative online LinUCB
 intervention policy. Python agent modules are small cooperating functions;
 there is no external agent framework.
 
@@ -31,6 +31,21 @@ keep FastAPI running on port 8000 and run `npm run dev` in a second terminal.
 Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/ws` to FastAPI.
 
 Upload learning material to generate a concept graph and begin. New sessions start without a preloaded question. All teaching, grading, extraction, and reflection use the configured provider.
+
+Create an account using **Sign up**, then use your email and password to log in.
+Each account has its own uploads, study sessions, drafts, and learning memory.
+The browser resumes the most recent study session for that account. Use **Log out**
+in the header to end the login.
+
+Passwords are hashed with scrypt and a unique random salt. Login tokens are stored
+as hashes in SQLite and sent in an HttpOnly, SameSite cookie that expires after
+seven days. Set `COOKIE_SECURE=true` when serving over HTTPS. The local HTTP
+setup uses `COOKIE_SECURE=false`.
+
+On startup, the app automatically adds the password column and the login and
+material ownership tables to existing databases. Existing anonymous sessions and
+uploaded files remain stored, but are not assigned to a new account. Re-upload
+the materials you want to use under your account.
 
 ## Enable OpenAI
 
@@ -75,7 +90,8 @@ agentic-tutor/
 │   ├── knowledge.py        # PDF/TXT/MD ingestion, BM25, prerequisite graph
 │   ├── tools.py            # Five display tools and four internal tools
 │   ├── visualization.py    # Typed, validated visualization traces
-│   ├── db.py               # All six SQLAlchemy models
+│   ├── auth.py             # Signup, login, password hashing, cookie sessions
+│   ├── db.py               # SQLite models and additive migrations
 │   └── utils.py            # Shared schemas, OpenAI helper, metrics
 ├── frontend/
 │   ├── index.html
@@ -115,7 +131,9 @@ All tables are defined in `backend/db.py`; there are no auxiliary tables.
 
 | Table | Columns |
 |---|---|
-| `users` | `id` integer PK; `email` unique string |
+| `users` | `id` integer PK; `email` unique string; nullable `password_hash` for legacy rows |
+| `logins` | `token_hash` PK; `user_id` FK; `expires_at` Unix timestamp |
+| `materials` | material `id` PK matching the disk index; `user_id` FK |
 | `sessions` | `id` integer PK; `user_id` FK; `state` JSON; `created_at` datetime |
 | `events` | `id` integer PK; `session_id` FK; `type` string; `data` JSON; `created_at` datetime |
 | `student_state` | `user_id` PK and FK; `data` JSON; `updated_at` datetime |
@@ -137,9 +155,8 @@ is queried with a bounded window instead of copied into memory JSON.
 
 ## End-to-end behavior
 
-1. A session is created or resumed from the saved browser session ID. One
-   development user owns local sessions. Course material is shared across this
-   local user's sessions.
+1. A signed-in student creates or resumes a study session. Session routes,
+   WebSockets, material uploads, and learning memory are scoped to that account.
 2. Workspace edits are debounced for one second; visible-tab inactivity events
    arrive every ten seconds for visible, unanswered questions. Attempts and explicit questions are sent immediately.
    Chat remains editable while model work runs in a background asyncio task.
@@ -287,9 +304,9 @@ Interactive HTTP schemas are available at `/docs`.
 
 ## Practical limits
 
-- This is a local, single-user MVP. Run **one Uvicorn worker** bound to localhost.
-  Authentication, ownership isolation, durable background queues, and cross-worker
-  coordination must be added before multi-user or public deployment.
+- Run **one Uvicorn worker**. Background queues and locks live in the server
+  process. Accounts provide login and ownership isolation. Email verification
+  and password reset are not implemented.
 - A browser refresh resumes saved work and recent chat. Events accepted before
   a process crash persist, but unfinished model jobs are not replayed.
 - The policy implementation is functional; its effectiveness has not been

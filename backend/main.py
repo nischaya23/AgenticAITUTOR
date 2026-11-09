@@ -1,4 +1,4 @@
-"""Local single-user FastAPI application; background agent jobs keep WS input live."""
+"""Authenticated FastAPI application; background agent jobs keep WS input live."""
 import asyncio
 import logging
 import time
@@ -7,16 +7,16 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from . import logging_setup as logs
-from . import hypothesis, plans, activity, config, knowledge, memory, observer, orchestrator, tools, utils
+from . import auth, hypothesis, plans, activity, config, knowledge, memory, observer, orchestrator, tools, utils
 from .response import Response, response_for
-from .db import Session, Event, Concept, ConceptEdge, SessionLocal, init_db, local_user, append_event
+from .db import Session, Event, Concept, Login, Material, SessionLocal, init_db, append_event
 
 SOCKETS: dict[int, set] = defaultdict(set)
 TASKS: dict[int, set] = defaultdict(set)
@@ -57,6 +57,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Agentic AI Tutor', lifespan=lifespan)
+app.include_router(auth.router)
 FRONTEND_BUILD = config.ROOT / 'frontend' / 'dist'
 app.mount('/assets', StaticFiles(directory=FRONTEND_BUILD / 'assets', check_dir=False), name='assets')
 
@@ -122,7 +123,28 @@ def session_log_uuid(session_id):
 @app.middleware('http')
 async def request_logging(request, call_next):
     parts = request.url.path.split('/')
-    sid = int(parts[3]) if len(parts) > 3 and parts[1:3] == ['api', 'sessions'] and parts[3].isdigit() else None
+    sid = None
+    if len(parts) > 3 and parts[1:3] == ['api', 'sessions']:
+        try:
+            sid = int(parts[3])
+        except ValueError:
+            pass
+    if request.url.path.startswith('/api/'):
+        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            origin = request.headers.get('origin')
+            if origin and origin.removeprefix('http://').removeprefix('https://') != request.headers.get('host'):
+                return JSONResponse({'detail': 'Cross-origin requests are not allowed.'}, status_code=403)
+        public = {'/api/health', '/api/auth/login', '/api/auth/signup', '/api/auth/me'}
+        if request.url.path not in public:
+            with SessionLocal() as db:
+                user = auth.user_for_token(db, request.cookies.get(auth.COOKIE))
+                if user is None:
+                    return JSONResponse({'detail': 'Please log in.'}, status_code=401)
+                request.state.user_id = user.id
+                if sid is not None:
+                    row = db.get(Session, sid)
+                    if row is None or row.user_id != user.id:
+                        return JSONResponse({'detail': 'Session not found.'}, status_code=404)
     uid = None
     if sid is not None:
         try:
@@ -134,6 +156,8 @@ async def request_logging(request, call_next):
         logs.event('http.start', method=request.method, path=request.url.path)
         try:
             response = await call_next(request)
+            if request.url.path.startswith('/api/'):
+                response.headers['Cache-Control'] = 'no-store'
             logs.event('http.complete', status=response.status_code, duration_ms=round((time.perf_counter()-started)*1000,2))
             return response
         except Exception as exc:
@@ -156,19 +180,46 @@ def health():
 
 
 @app.post('/api/sessions')
-def create_session():
+def create_session(request: Request):
     with SessionLocal.begin() as db:
-        user = local_user(db)
+        user_id = request.state.user_id
         state = utils.SessionData(log_uuid=uuid4().hex).model_dump(mode='json')
-        state['assessed_hypotheses'] = memory.get_long_term_memory(db, user.id).get('hypotheses', [])
-        row = Session(user_id=user.id, state=state)
+        state['assessed_hypotheses'] = memory.get_long_term_memory(db, user_id).get('hypotheses', [])
+        row = Session(user_id=user_id, state=state)
         db.add(row)
         db.flush()
         with logs.scope(row.id, state['log_uuid']):
-            memory.update_long_term_memory(db, user.id, {})
+            memory.update_long_term_memory(db, user_id, {})
             append_event(db, row.id, 'session_started', {})
             logs.event('session.created')
         return {'id': row.id, 'state': public_state(state)}
+
+
+@app.get('/api/sessions')
+def list_sessions(request: Request):
+    with SessionLocal() as db:
+        rows = db.scalars(select(Session).where(Session.user_id == request.state.user_id)
+            .order_by(Session.id.desc()).limit(100)).all()
+        return {'sessions': [{'id': row.id, 'material_id': row.state.get('material_id'),
+                             'ended': row.state.get('ended', False)} for row in rows]}
+
+
+@app.post('/api/auth/logout')
+async def logout(request: Request):
+    token = request.cookies.get(auth.COOKIE)
+    with SessionLocal.begin() as db:
+        db.execute(delete(Login).where(Login.token_hash == auth.token_hash(token)))
+    for sockets in list(SOCKETS.values()):
+        for socket in list(sockets):
+            if socket.cookies.get(auth.COOKIE) == token:
+                sockets.discard(socket)
+                try:
+                    await socket.close(code=1008)
+                except RuntimeError:
+                    pass
+    response = JSONResponse({'ok': True})
+    response.delete_cookie(auth.COOKIE, path='/', secure=config.COOKIE_SECURE, httponly=True, samesite='strict')
+    return response
 
 
 @app.get('/api/sessions/{session_id}')
@@ -183,9 +234,9 @@ def read_session(session_id: int):
 
 
 @app.get('/api/student')
-def read_student():
+def read_student(request: Request):
     with SessionLocal.begin() as db:
-        data = memory.get_long_term_memory(db, local_user(db).id)
+        data = memory.get_long_term_memory(db, request.state.user_id)
         return {k: v for k, v in data.items() if k != 'policy'}
 
 
@@ -201,12 +252,15 @@ async def new_problem(session_id: int, request: ProblemRequest):
 
 async def _new_problem(session_id: int, request: ProblemRequest):
     with SessionLocal() as db:
-        initial = require_session(db, session_id).state
+        initial_row = require_session(db, session_id)
+        initial = initial_row.state
+        user_id = initial_row.user_id
         if initial['ended']:
             raise HTTPException(409, 'Start a new session first.')
         revision = initial['revision']
     try:
-        problem = await tools.generate_problem(request.concept, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
+        sources = knowledge.retrieve_knowledge(request.concept, user_id=user_id)
+        problem = await tools.generate_problem(request.concept, sources=sources, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
             hypotheses=hypothesis.eligible(initial), hypothesis_version=initial.get('hypothesis_state', {}).get('version', 0),
             recent_formats=initial.get('recent_formats', []), previous_prompts=initial.get('recent_questions', []))
     except (RuntimeError, ValueError) as exc:
@@ -231,13 +285,13 @@ async def _new_problem(session_id: int, request: ProblemRequest):
 
 
 @app.get('/api/materials')
-async def materials():
-    records = await asyncio.to_thread(knowledge.list_materials)
+async def materials(request: Request):
+    records = await asyncio.to_thread(knowledge.list_materials, request.state.user_id)
     return [{'id': m['id'], 'name': m['name'], 'chunks': m['chunks']} for m in records]
 
 
 @app.post('/api/materials')
-async def upload_material(file: UploadFile = File(...)):
+async def upload_material(request: Request, file: UploadFile = File(...)):
     content = await file.read(config.MAX_UPLOAD_BYTES + 1)
     if len(content) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(413, 'Upload limit is 8 MiB.')
@@ -246,8 +300,10 @@ async def upload_material(file: UploadFile = File(...)):
         text = await asyncio.to_thread(knowledge.extract_text, name, content)
         graph = await knowledge.extract_concepts(text)
         with SessionLocal.begin() as db:
-            graph = knowledge.store_graph(db, graph)
+            graph = knowledge.store_graph(db, graph, isolated=True)
         record = await asyncio.to_thread(knowledge.save_material, name, content, text, graph.model_dump())
+        with SessionLocal.begin() as db:
+            db.add(Material(id=record['id'], user_id=request.state.user_id))
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {'id': record['id'], 'name': record['name'], 'concepts': graph.model_dump()}
@@ -336,9 +392,13 @@ class StudyRequest(utils.Schema):
 
 
 @app.post('/api/sessions/{session_id}/study')
-async def start_study(session_id: int, request: StudyRequest):
+async def start_study(session_id: int, request: StudyRequest, http_request: Request):
     async with LOCKS.setdefault(session_id, asyncio.Lock()):
         try:
+            with SessionLocal() as db:
+                owned = db.get(Material, request.material_id)
+                if owned is None or owned.user_id != http_request.state.user_id:
+                    raise HTTPException(404, 'Material not found.')
             material = await asyncio.to_thread(knowledge.get_material, request.material_id)
             if not (material.get('graph') or {}).get('concepts'):
                 raise ValueError('No concepts were extracted. Upload readable learning material.')
@@ -456,10 +516,16 @@ def get_study(session_id: int):
 
 
 @app.get('/api/concepts')
-def concepts():
+def concepts(request: Request):
+    materials = knowledge.list_materials(request.state.user_id)
+    graphs = [material.get('graph') or {} for material in materials]
+    names = {name for graph in graphs for name in graph.get('concepts', [])}
+    edges = {(edge['prerequisite'], edge['concept']) for graph in graphs for edge in graph.get('prerequisites', [])}
     with SessionLocal() as db:
-        return {'nodes': [{'id': c.id, 'name': c.name} for c in db.scalars(select(Concept))],
-                'edges': [{'from_id': e.from_id, 'to_id': e.to_id} for e in db.scalars(select(ConceptEdge))]}
+        nodes = list(db.scalars(select(Concept).where(Concept.name.in_(names))))
+        ids = {node.name: node.id for node in nodes}
+        return {'nodes': [{'id': node.id, 'name': node.name} for node in nodes],
+                'edges': [{'from_id': ids[a], 'to_id': ids[b]} for a, b in edges if a in ids and b in ids]}
 
 
 @app.get('/api/metrics')
@@ -472,6 +538,12 @@ def metrics():
 async def broadcast(session_id: int, data: dict):
     for socket in list(SOCKETS[session_id]):
         try:
+            with SessionLocal() as db:
+                valid = auth.user_for_token(db, socket.cookies.get(auth.COOKIE)) is not None
+            if not valid:
+                SOCKETS[session_id].discard(socket)
+                await socket.close(code=1008)
+                continue
             await socket.send_json(data)
         except (WebSocketDisconnect, RuntimeError):
             SOCKETS[session_id].discard(socket)
@@ -577,7 +649,9 @@ async def websocket(socket: WebSocket, session_id: int):
         await socket.close(code=1008)
         return
     with SessionLocal() as db:
-        if db.get(Session, session_id) is None:
+        user = auth.user_for_token(db, socket.cookies.get(auth.COOKIE))
+        row = db.get(Session, session_id)
+        if user is None or row is None or row.user_id != user.id:
             await socket.close(code=1008)
             return
     await socket.accept()
@@ -587,6 +661,10 @@ async def websocket(socket: WebSocket, session_id: int):
     try:
         while True:
             raw = await socket.receive_text()
+            with SessionLocal() as db:
+                if auth.user_for_token(db, socket.cookies.get(auth.COOKIE)) is None:
+                    await socket.close(code=1008)
+                    return
             if len(raw) > 120000:
                 await socket.send_json({'type': 'error', 'message': 'Event too large.'})
                 continue

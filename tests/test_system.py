@@ -36,10 +36,10 @@ def stalled(factory, sid):
         memory.update_short_term_memory(connection, sid, state)
 
 
-def test_six_tables_fk_append_only_and_restart(app_env):
+def test_tables_fk_append_only_and_restart(app_env):
     client, factory, engine = app_env
     sid = create(client)
-    assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges'}
+    assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges','logins','materials'}
     with factory.begin() as connection:
         row = connection.get(db.Session, sid)
         memory.update_long_term_memory(connection, row.user_id, {'memories':['I prefer invariants.']})
@@ -217,7 +217,7 @@ async def test_feedback_is_linked_once_and_negative_outcome_replans(app_env):
     assert not job['replan']
     assert any(output['type'] == 'plan' for output in await orchestrator.handle(job))
     with factory() as connection:
-        assert memory.get_long_term_memory(connection, db.local_user(connection).id)['policy']['updates'] == 1
+        assert memory.get_long_term_memory(connection, connection.get(db.Session, sid).user_id)['policy']['updates'] == 1
     with pytest.raises(ValueError):
         ingest(factory,sid,type='feedback',rating=1,intervention_id=output['event_id'])
 

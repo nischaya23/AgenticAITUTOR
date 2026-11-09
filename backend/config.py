@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
+COOKIE_SECURE = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4.1-mini')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 DATABASE_URL = os.getenv('DATABASE_URL', f'sqlite:///{ROOT / "tutor.db"}')
