@@ -29,6 +29,11 @@ Open **http://127.0.0.1:8000**. On Windows, activate with
 FastAPI serves the production build from `frontend/dist`. For development,
 keep FastAPI running on port 8000 and run `npm run dev` in a second terminal.
 Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/ws` to FastAPI.
+The backend permits the Vite origins `http://localhost:5173` and
+`http://127.0.0.1:5173` for API requests and authenticated WebSockets. Override
+the comma-separated `CORS_ORIGINS` in `.env` if your frontend uses another origin,
+then restart the backend. Use a consistent hostname in the browser so login
+cookies continue through the Vite proxy.
 
 Upload learning material to generate a concept graph and begin. New sessions start without a preloaded question. All teaching, grading, extraction, and reflection use the configured provider.
 

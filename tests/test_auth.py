@@ -90,3 +90,48 @@ def test_existing_database_migrates_without_claiming_anonymous_data(tmp_path, mo
         assert connection.exec_driver_sql('SELECT COUNT(*) FROM logins').scalar() == 0
         assert connection.exec_driver_sql('SELECT COUNT(*) FROM materials').scalar() == 0
     engine.dispose()
+
+
+@pytest.mark.parametrize('origin', ['http://localhost:5173', 'http://127.0.0.1:5173'])
+def test_vite_origin_signup_preflight_cookie_and_socket(app_env, origin):
+    with TestClient(main.app, base_url='http://127.0.0.1:8000') as browser:
+        preflight = browser.options('/api/sessions', headers={
+            'Origin': origin, 'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'content-type'})
+        assert preflight.status_code == 200
+        assert preflight.headers['access-control-allow-origin'] == origin
+        assert preflight.headers['access-control-allow-credentials'] == 'true'
+        headers = {'Origin': origin}
+        response = browser.post('/api/auth/signup', headers=headers,
+            json={'email': 'vite@example.com', 'password': 'vite-password'})
+        assert response.status_code == 201, response.text
+        assert response.headers['access-control-allow-origin'] == origin
+        assert response.headers['access-control-allow-credentials'] == 'true'
+        assert browser.cookies.get(auth.COOKIE)
+        assert browser.get('/api/auth/me', headers=headers).json()['user']['email'] == 'vite@example.com'
+        sid = browser.post('/api/sessions', headers=headers).json()['id']
+        with browser.websocket_connect(f'ws://127.0.0.1:8000/ws/{sid}', headers=headers) as socket:
+            assert socket.receive_json()['type'] == 'observer_status'
+
+
+@pytest.mark.parametrize('origin', ['http://localhost:3000', 'http://untrusted.example', 'http://localhost:5173.evil.example'])
+def test_untrusted_origins_remain_rejected(app_env, origin):
+    client, _, _ = app_env
+    response = client.post('/api/auth/signup', headers={'Origin': origin},
+        json={'email': 'blocked@example.com', 'password': 'blocked-password'})
+    assert response.status_code == 403
+    assert 'access-control-allow-origin' not in response.headers
+    sid = client.post('/api/sessions').json()['id']
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f'/ws/{sid}', headers={'Origin': origin}):
+            pass
+
+
+def test_vite_can_read_authentication_errors_and_same_origin_still_works(app_env):
+    with TestClient(main.app) as browser:
+        response = browser.post('/api/sessions', headers={'Origin': 'http://localhost:5173'})
+        assert response.status_code == 401
+        assert response.headers['access-control-allow-origin'] == 'http://localhost:5173'
+        response = browser.post('/api/auth/login', headers={'Origin': 'http://testserver'},
+            json={'email': 'student@local.test', 'password': 'test-password'})
+        assert response.status_code == 200
