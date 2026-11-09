@@ -40,6 +40,10 @@ def test_all_interventions_materials_and_mobile(tmp_path):
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(base)
+            page.get_by_role('button', name='Sign up', exact=True).click()
+            page.get_by_label('Email', exact=True).fill('student@example.com')
+            page.get_by_label('Password', exact=True).fill('test-password')
+            page.get_by_role('button', name='Create account', exact=True).click()
             playwright.expect(page.locator('button[data-tool]')).to_have_count(5)
             editor=page.get_by_role('textbox', name='Your response text')
             page.locator('#upload').set_input_files({'name':'course.md','mimeType':'text/markdown',

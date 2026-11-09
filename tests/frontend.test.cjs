@@ -27,7 +27,7 @@ async function until(predicate) {
   throw Error('Expected UI update did not occur');
 }
 
-async function setup(t, { draft } = {}) {
+async function setup(t, { draft, authenticated = true } = {}) {
   const dom = new JSDOM(html, { url: 'http://localhost:8000', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window;
@@ -37,10 +37,12 @@ async function setup(t, { draft } = {}) {
   const intervals=[];
   const setInterval=w.setInterval.bind(w);
   w.setInterval=(callback,delay,...args)=>{intervals.push({callback,delay});return setInterval(callback,delay,...args);};
-  w.localStorage.setItem('studyroom-auto-session', '1');
-  if (draft) w.localStorage.setItem('studyroom-draft-1', JSON.stringify({questionId:'p1',response:draft}));
+  w.localStorage.setItem('studyroom-auto-session-1', '1');
+  if (draft) w.localStorage.setItem('studyroom-draft-1-1', JSON.stringify({questionId:'p1',response:draft}));
   w.DOMMatrixReadOnly = class { m22 = 1; };
   w.fetch = async (url, options) => {
+    if (url === '/api/auth/me') return { ok: authenticated, status: authenticated ? 200 : 401,
+      json: async () => authenticated ? {user: {id: 1, email: 'student@example.com'}} : {detail: 'Please log in.'} };
     if(options?.method === 'PUT'){ const body=JSON.parse(options.body); requests.push(body); return {ok:true,json:async()=>({type:'plan',plan:body.plan,plan_version:body.expected_version+1})}; }
     if(url.endsWith('/next')){requests.push({path:url,...JSON.parse(options.body)});return {ok:true,json:async()=>({...study,state:{...study.state,current_problem:{id:'p2',prompt:'Next question'}}})};}
     return { ok: true, json: async () => url.endsWith('/study') ? study : { history: [] } };
@@ -60,9 +62,23 @@ async function setup(t, { draft } = {}) {
   await entry.link(() => { throw Error('Unexpected static import in the built entry'); });
   await entry.evaluate();
   const document = w.document;
-  await until(() => document.querySelector('#submit:not(:disabled)'));
+  await until(() => document.querySelector(authenticated ? '#submit:not(:disabled)' : '#auth-email'));
   return { document, messages, requests, intervals, window: w, dispatch: data => socket.onmessage({ data: JSON.stringify(data) }) };
 }
+
+test('signed-out visitors see login and logout removes the study workspace', async t => {
+  const guest = await setup(t, {authenticated: false});
+  assert.equal(guest.document.querySelector('#upload'), null);
+  assert.equal(guest.messages.length, 0);
+  const signup = [...guest.document.querySelectorAll('button')].find(button => button.textContent === 'Sign up');
+  signup.click();
+  await until(() => guest.document.querySelector('h1').textContent === 'Create your account');
+  const signedIn = await setup(t);
+  const logout = [...signedIn.document.querySelectorAll('button')].find(button => button.textContent === 'Log out');
+  logout.click();
+  await until(() => signedIn.document.querySelector('#auth-email'));
+  assert.equal(signedIn.document.querySelector('#workspace'), null);
+});
 
 test('annotations decorate exact Unicode-aware ranges and dismissal preserves student text', async t => {
   const { document, dispatch } = await setup(t);
@@ -172,7 +188,7 @@ test('diagram annotations stay inside the response and clear after renaming a no
   Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'Renamed');
   input.dispatchEvent(new window.Event('input',{bubbles:true}));
   await until(()=>!response.querySelector('.diagram-issue'));
-  assert.match(window.localStorage.getItem('studyroom-draft-1'),/Renamed/);
+  assert.match(window.localStorage.getItem('studyroom-draft-1-1'),/Renamed/);
 });
 
 test('hypothesis panel reports origin, confidence, evidence and unavailable states',async t=>{

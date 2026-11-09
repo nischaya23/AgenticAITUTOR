@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MotionConfig } from 'motion/react';
+import Auth, { authExpired, type User } from './Auth';
 import LearningPlanPanel from './LearningPlan';
 import DiagramView, { emptyDiagram } from './Diagram';
 import Hypotheses from './Hypotheses';
@@ -9,13 +10,13 @@ import VisualPlayer, { FlowGraph } from './Visualization';
 import type { Annotation, Assessment, Diagram, DiagramAnnotation, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool } from './types';
 import '../styles.css';
 
-const storageKey = 'studyroom-auto-session';
 const tools: Tool[] = ['hint', 'explanation', 'highlight', 'visualization', 'guiding_question'];
 const label = (name: string) => name.replaceAll('_', ' ');
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => null);
+  if (response.status === 401) window.dispatchEvent(new Event(authExpired));
   if (!response.ok) throw Error(typeof data?.detail === 'string' ? data.detail : 'Request failed (' + response.status + ').');
   return data as T;
 }
@@ -47,7 +48,9 @@ function Intervention({ result }: { result: Result }) {
   </>;
 }
 
-function App() {
+function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
+  const storageKey = 'studyroom-auto-session-' + user.id;
+  const draftPrefix = 'studyroom-draft-' + user.id + '-';
   const [sid, setSid] = useState(() => Number(localStorage.getItem(storageKey)) || null);
   const [study, setStudy] = useState<Study | null>(null);
   const [observer, setObserver] = useState<Observer>({});
@@ -96,7 +99,7 @@ function App() {
   }
 
   function saveDraft() {
-    try { localStorage.setItem('studyroom-draft-' + sid, JSON.stringify({ questionId: current.current?.state.current_problem.id, response: responseValue() })); }
+    try { localStorage.setItem(draftPrefix + sid, JSON.stringify({ questionId: current.current?.state.current_problem.id, response: responseValue() })); }
     catch { /* The server still saves drafts if browser storage is unavailable. */ }
     markDraft();
     window.clearTimeout(editTimer.current);
@@ -129,7 +132,7 @@ function App() {
       sent.current = JSON.stringify(saved);
       let restored = saved;
       try {
-        const local = JSON.parse(localStorage.getItem('studyroom-draft-' + sessionId) ?? 'null');
+        const local = JSON.parse(localStorage.getItem(draftPrefix + sessionId) ?? 'null');
         if (local?.questionId === view.state.current_problem.id && typeof local.response?.text === 'string'
           && Array.isArray(local.response?.diagram?.nodes) && Array.isArray(local.response?.diagram?.edges)) restored = local.response;
       } catch { /* A malformed local draft cannot replace the server copy. */ }
@@ -188,7 +191,7 @@ function App() {
         responseRevision.current = Math.max(responseRevision.current, message.response_revision ?? 0);
         if (message.action === 'edit') {
           pendingEdits.current = Math.max(0, pendingEdits.current - 1);
-          if (!pendingEdits.current && JSON.stringify(responseValue()) === sent.current) localStorage.removeItem('studyroom-draft-' + sid);
+          if (!pendingEdits.current && JSON.stringify(responseValue()) === sent.current) localStorage.removeItem(draftPrefix + sid);
         }
         if (message.event_type === 'student_message' && message.content) {
           appendHistory({ id: message.event_id, type: 'student_message', data: { content: message.content } });
@@ -236,6 +239,19 @@ function App() {
   }
 
   useEffect(() => {
+    if (sid) return;
+    let active = true;
+    void api<{ sessions: { id: number; material_id?: string }[] }>('/api/sessions').then(data => {
+      const saved = data.sessions.find(item => item.material_id);
+      if (active && saved) {
+        localStorage.setItem(storageKey, String(saved.id));
+        setSid(saved.id);
+      }
+    }).catch(error => { if (active) setNotice((error as Error).message); });
+    return () => { active = false; };
+  }, [sid]);
+
+  useEffect(() => {
     if (!sid || uploading) return;
     let stopped = false;
     let reconnect: number;
@@ -267,10 +283,14 @@ function App() {
           if (!stopped) setNotice((error as Error).message);
         }
       };
-      socket.onclose = () => {
+      socket.onclose = event => {
         if (stopped || ws.current !== socket) return;
         setConnected(false);
         setBusy(false);
+        if (event.code === 1008) {
+          window.dispatchEvent(new Event(authExpired));
+          return;
+        }
         reconnect = window.setTimeout(connect, 2000);
       };
     }
@@ -297,13 +317,13 @@ function App() {
     };
   }, [sid, uploading]);
 
-  async function upload(files: File[]) {
+  async function upload(file: File) {
     setUploading(true);
     setConnected(false);
     setNotice('');
     try {
       const form = new FormData();
-      for (const file of files) form.append('files', file);
+      form.append('file', file);
       const material = await api<{ id: string }>('/api/materials', { method: 'POST', body: form });
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
@@ -356,17 +376,23 @@ function App() {
 
   return <MotionConfig reducedMotion="user">
     <header><strong>Studyroom</strong><span id="status" role="status">
-      {uploading ? 'Building one learning graph from your materials…' : study?.state.study_complete ? 'Learning target reached'
+      {uploading ? 'Preparing your learning plan and first question…' : study?.state.study_complete ? 'Learning target reached'
         : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
         : study?.material.name ?? 'Upload material to begin'}
-    </span><label className="upload" title="Select one or more PDF, TXT or Markdown files (up to 10)">Upload materials
-      <input id="upload" type="file" accept=".pdf,.txt,.md" multiple
+    </span><label className="upload">Upload material<input id="upload" type="file" accept=".pdf,.txt,.md"
       disabled={uploading} onChange={event => {
-        const files = Array.from(event.target.files ?? []);
+        const file = event.target.files?.[0];
         event.target.value = '';
-        if (files.length > 10) { setNotice('Select at most 10 files at once.'); return; }
-        if (files.length) void upload(files);
-      }} /></label></header>
+        if (file) void upload(file);
+      }} /></label>
+      <div className="account-controls"><span>{user.email}</span><button type="button"
+        disabled={uploading || pending || busy} onClick={async () => {
+          try {
+            flushEdits();
+            await logout();
+          } catch { setNotice('Could not log out. Please try again.'); }
+        }}>Log out</button></div>
+    </header>
     {notice && <p id="notice" role="alert">{notice}</p>}
     <main>
       <section className="panel question-panel">
@@ -467,13 +493,13 @@ function App() {
           masteryTarget={study.mastery_target} label="Concept graph and estimated mastery" />
           : <p className="muted">Your map will appear after processing.</p>}</div>
         {study && <details><summary id="material-name">{study.material.name}</summary>
-          {(study.material.sources?.length ?? 0) > 1 && <ul id="material-sources" className="muted">
-            {study.material.sources!.map(source => <li key={source}>{source}</li>)}</ul>}
           <pre>{study.material.chunks[0]?.text}</pre></details>}
       </aside>
     </main>
   </MotionConfig>;
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(
+  <Auth>{(user, logout) => <App key={user.id} user={user} logout={logout} />}</Auth>,
+);
 

@@ -28,6 +28,8 @@ def app_env(tmp_path, monkeypatch):
     monkeypatch.setattr(assessment, 'evaluate_attempt', mock_assess)
     utils.METRICS.clear()
     with TestClient(main.app) as client:
+        response = client.post('/api/auth/signup', json={'email': 'student@local.test', 'password': 'test-password'})
+        assert response.status_code == 201, response.text
         yield client, factory, engine
     engine.dispose()
 
