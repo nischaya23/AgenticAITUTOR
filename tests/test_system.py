@@ -347,3 +347,36 @@ async def test_pre_intervention_attempt_is_not_credited_to_the_bandit(app_env):
             {'verified':True,'correct':True,'observed_at':job['received_at']-10},job['event_id'])
         assert result['reward'] is None
         assert memory.get_long_term_memory(connection,row.user_id)['policy']['updates']==0
+
+
+def test_multiple_materials_build_one_graph(app_env):
+    client,_,_=app_env
+    files=[('files',('queues.md',b'# Queues\nA queue uses FIFO ordering.','text/markdown')),
+           ('files',('stacks.md',b'# Stacks\nA stack uses LIFO ordering.','text/markdown'))]
+    response=client.post('/api/materials',files=files)
+    assert response.status_code==200
+    body=response.json()
+    assert body['sources']==['queues.md','stacks.md']
+    assert body['name']=='queues.md + stacks.md'
+    assert {'Queues','Stacks'}<=set(body['concepts']['concepts'])
+    material=knowledge.get_material(body['id'])
+    assert {c['source'] for c in material['chunks']}=={'queues.md','stacks.md'}
+    assert len({c['id'] for c in material['chunks']})==len(material['chunks'])
+    assert knowledge.retrieve_knowledge('LIFO stack',material_id=body['id'])[0]['source']=='stacks.md'
+    bad=client.post('/api/materials',files=[files[0],('files',('bad.exe',b'bad','text/plain'))])
+    assert bad.status_code==400 and 'bad.exe' in bad.json()['detail']
+    too_many=[('files',(f'm{i}.md',b'# M\ntext','text/markdown')) for i in range(11)]
+    assert client.post('/api/materials',files=too_many).status_code==400
+
+
+def test_legacy_mastery_records_do_not_block_new_sessions(app_env):
+    client,factory,_=app_env
+    from backend.db import StudentState
+    assert client.post('/api/sessions').status_code==200
+    with factory.begin() as db:
+        row=db.scalars(__import__('sqlalchemy').select(StudentState)).first()
+        row.data={**row.data,'mastery':{'Groups':.4,'Calculus':{'a':1.0,'b':3.0,'t':1.0},'Broken':{'x':1}}}
+    assert client.post('/api/sessions').status_code==200
+    with factory() as db:
+        row=db.scalars(__import__('sqlalchemy').select(StudentState)).first()
+        assert row.data['mastery']=={'Groups':.4,'Calculus':.25}

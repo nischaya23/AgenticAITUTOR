@@ -297,13 +297,13 @@ function App() {
     };
   }, [sid, uploading]);
 
-  async function upload(file: File) {
+  async function upload(files: File[]) {
     setUploading(true);
     setConnected(false);
     setNotice('');
     try {
       const form = new FormData();
-      form.append('file', file);
+      for (const file of files) form.append('files', file);
       const material = await api<{ id: string }>('/api/materials', { method: 'POST', body: form });
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
@@ -356,14 +356,16 @@ function App() {
 
   return <MotionConfig reducedMotion="user">
     <header><strong>Studyroom</strong><span id="status" role="status">
-      {uploading ? 'Preparing your learning plan and first question…' : study?.state.study_complete ? 'Learning target reached'
+      {uploading ? 'Building one learning graph from your materials…' : study?.state.study_complete ? 'Learning target reached'
         : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
         : study?.material.name ?? 'Upload material to begin'}
-    </span><label className="upload">Upload material<input id="upload" type="file" accept=".pdf,.txt,.md"
+    </span><label className="upload" title="Select one or more PDF, TXT or Markdown files (up to 10)">Upload materials
+      <input id="upload" type="file" accept=".pdf,.txt,.md" multiple
       disabled={uploading} onChange={event => {
-        const file = event.target.files?.[0];
+        const files = Array.from(event.target.files ?? []);
         event.target.value = '';
-        if (file) void upload(file);
+        if (files.length > 10) { setNotice('Select at most 10 files at once.'); return; }
+        if (files.length) void upload(files);
       }} /></label></header>
     {notice && <p id="notice" role="alert">{notice}</p>}
     <main>
@@ -465,6 +467,8 @@ function App() {
           masteryTarget={study.mastery_target} label="Concept graph and estimated mastery" />
           : <p className="muted">Your map will appear after processing.</p>}</div>
         {study && <details><summary id="material-name">{study.material.name}</summary>
+          {(study.material.sources?.length ?? 0) > 1 && <ul id="material-sources" className="muted">
+            {study.material.sources!.map(source => <li key={source}>{source}</li>)}</ul>}
           <pre>{study.material.chunks[0]?.text}</pre></details>}
       </aside>
     </main>

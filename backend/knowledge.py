@@ -39,14 +39,31 @@ def extract_text(filename: str, content: bytes) -> str:
         raise ValueError('Material is too long; split it into smaller documents.')
     return text
 
+def material_title(names: list[str]) -> str:
+    if len(names) <= 2:
+        return ' + '.join(names)
+    return f'{names[0]} + {len(names) - 1} more'
+
 def save_material(filename: str, content: bytes, text: str, graph: dict | None=None) -> dict:
+    return save_materials([(filename, content, text)], graph)
+
+def save_materials(documents: list[tuple[str, bytes, str]], graph: dict | None=None) -> dict:
+    """Store one or more documents as a single material with a shared concept graph."""
+    if not documents:
+        raise ValueError('Upload at least one file.')
     directory = config.DATA_DIR / 'materials'
     directory.mkdir(parents=True, exist_ok=True)
     material_id = uuid.uuid4().hex
-    suffix = Path(filename).suffix.lower()
-    (directory / f'{material_id}{suffix}').write_bytes(content)
-    chunks = [dict(id=f'{material_id}:{i}', source=Path(filename).name, text=text[start:start + 1400]) for i, start in enumerate(range(0, len(text), 1100))]
-    record = dict(id=material_id, name=Path(filename).name, chunks=chunks, graph=graph)
+    chunks, names = [], []
+    for index, (filename, content, text) in enumerate(documents):
+        name = Path(filename).name
+        names.append(name)
+        suffix = Path(filename).suffix.lower()
+        stored = f'{material_id}{suffix}' if len(documents) == 1 else f'{material_id}-{index}{suffix}'
+        (directory / stored).write_bytes(content)
+        chunks.extend(dict(id=f'{material_id}:{len(chunks) + j}', source=name, text=text[start:start + 1400])
+                      for j, start in enumerate(range(0, len(text), 1100)))
+    record = dict(id=material_id, name=material_title(names), sources=names, chunks=chunks, graph=graph)
     temporary = directory / f'{material_id}.tmp'
     temporary.write_text(json.dumps(record), encoding='utf-8')
     temporary.replace(directory / f'{material_id}.json')
@@ -81,8 +98,20 @@ def retrieve_knowledge(query: str, limit: int=4, material_id: str | None=None) -
             scored.append({**chunk, 'score': round(score, 4)})
     return sorted(scored, key=lambda c: c['score'], reverse=True)[:limit]
 
-async def extract_concepts(text: str) -> ConceptGraph:
-    return await utils.call_llm(prompts.EXTRACT_CONCEPTS, text[:24000], schema=ConceptGraph, operation='EXTRACT_CONCEPTS')
+EXTRACTION_BUDGET = 24000
+
+def extraction_input(documents: list[tuple[str, str]]) -> str:
+    """Give every document an equal share of the extraction budget, labelled by file name."""
+    if len(documents) == 1:
+        return documents[0][1][:EXTRACTION_BUDGET]
+    share = EXTRACTION_BUDGET // len(documents)
+    sections = (f'### Document {i}: {name}\n{text[:share]}' for i, (name, text) in enumerate(documents, 1))
+    return '\n\n'.join(sections)
+
+async def extract_concepts(text: str | list[tuple[str, str]]) -> ConceptGraph:
+    documents = [('material', text)] if isinstance(text, str) else text
+    instructions = prompts.EXTRACT_CONCEPTS if len(documents) == 1 else prompts.EXTRACT_CONCEPTS_MULTI
+    return await utils.call_llm(instructions, extraction_input(documents), schema=ConceptGraph, operation='EXTRACT_CONCEPTS')
 
 def store_graph(db, graph: ConceptGraph):
     names = list(dict.fromkeys((n.strip()[:200] for n in graph.concepts if n.strip())))

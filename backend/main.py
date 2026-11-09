@@ -210,24 +210,39 @@ async def _new_problem(session_id: int, request: ProblemRequest):
 @app.get('/api/materials')
 async def materials():
     records = await asyncio.to_thread(knowledge.list_materials)
-    return [{'id': m['id'], 'name': m['name'], 'chunks': m['chunks']} for m in records]
+    return [{'id': m['id'], 'name': m['name'], 'sources': m.get('sources', [m['name']]), 'chunks': m['chunks']} for m in records]
 
 
 @app.post('/api/materials')
-async def upload_material(file: UploadFile = File(...)):
-    content = await file.read(config.MAX_UPLOAD_BYTES + 1)
-    if len(content) > config.MAX_UPLOAD_BYTES:
-        raise HTTPException(413, 'Upload limit is 8 MiB.')
-    name = Path(file.filename or 'material.txt').name
+async def upload_material(file: UploadFile | None = File(None), files: list[UploadFile] | None = File(None)):
+    """Build one concept graph from a single file or from several selected files."""
+    uploads = ([file] if file else []) + list(files or [])
+    if not uploads:
+        raise HTTPException(400, 'Upload at least one file.')
+    if len(uploads) > config.MAX_UPLOAD_FILES:
+        raise HTTPException(400, f'Upload at most {config.MAX_UPLOAD_FILES} files at once.')
+    documents, total = [], 0
     try:
-        text = await asyncio.to_thread(knowledge.extract_text, name, content)
-        graph = await knowledge.extract_concepts(text)
+        for upload in uploads:
+            content = await upload.read(config.MAX_UPLOAD_BYTES + 1)
+            name = Path(upload.filename or 'material.txt').name
+            if len(content) > config.MAX_UPLOAD_BYTES:
+                raise HTTPException(413, f'{name}: the upload limit is 8 MiB per file.')
+            try:
+                text = await asyncio.to_thread(knowledge.extract_text, name, content)
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError(f'{name}: {exc}' if len(uploads) > 1 else str(exc)) from exc
+            total += len(text)
+            if total > 600000:
+                raise ValueError('Selected materials are too long together; choose fewer or smaller files.')
+            documents.append((name, content, text))
+        graph = await knowledge.extract_concepts([(name, text) for name, _, text in documents])
         with SessionLocal.begin() as db:
             graph = knowledge.store_graph(db, graph)
-        record = await asyncio.to_thread(knowledge.save_material, name, content, text, graph.model_dump())
+        record = await asyncio.to_thread(knowledge.save_materials, documents, graph.model_dump())
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {'id': record['id'], 'name': record['name'], 'concepts': graph.model_dump()}
+    return {'id': record['id'], 'name': record['name'], 'sources': record['sources'], 'concepts': graph.model_dump()}
 
 
 MASTERY_TARGET = .75  # A progression heuristic, not a calibrated probability.

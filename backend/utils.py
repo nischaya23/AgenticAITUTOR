@@ -7,7 +7,7 @@ from collections import Counter
 from functools import lru_cache
 from typing import Literal
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 from . import config, prompts, logging_setup as logs
 from .response import Schema, Response
 
@@ -42,9 +42,28 @@ class SessionData(BaseModel):
     ended: bool = False
 
 
+def normalize_mastery(values) -> dict[str, float]:
+    """Accept saved mastery numbers, converting legacy {a, b} records and dropping unreadable ones."""
+    result = {}
+    for name, value in (values or {}).items() if isinstance(values, dict) else ():
+        if isinstance(value, dict):
+            a, b = value.get('a'), value.get('b')
+            if not all(isinstance(x, (int, float)) and x >= 0 for x in (a, b)) or a + b <= 0:
+                continue
+            value = a / (a + b)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            result[str(name)] = round(max(0.0, min(1.0, float(value))), 4)
+    return result
+
+
 class StudentData(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mastery: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator('mastery', mode='before')
+    @classmethod
+    def _legacy_mastery(cls, value):
+        return normalize_mastery(value)
     misconceptions: list[dict[str, JsonValue]] = Field(default_factory=list)
     memories: list[str] = Field(default_factory=list)
     learning_goals: list[str] = Field(default_factory=list)
