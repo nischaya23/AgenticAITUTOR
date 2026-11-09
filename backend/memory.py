@@ -3,13 +3,13 @@ from copy import deepcopy
 from .activity import record
 from sqlalchemy import select
 from .db import Session, StudentState, Event
-from .utils import SessionData, StudentData
+from .utils import SessionData, StudentData, normalize_mastery
 
 
 def get_observer_memory(db, user_id: int) -> dict:
     row = db.get(StudentState, user_id)
     data = row.data if row else {}
-    return {'mastery': deepcopy(data.get('mastery', {})), 'policy': deepcopy(data.get('policy'))}
+    return {'mastery': normalize_mastery(data.get('mastery', {})), 'policy': deepcopy(data.get('policy'))}
 
 
 def get_short_term_memory(db, session_id: int) -> dict:
@@ -36,7 +36,11 @@ def update_short_term_memory(db, session_id: int, updates: dict) -> dict:
 def get_long_term_memory(db, user_id: int) -> dict:
     row = db.get(StudentState, user_id)
     record('memory_read', 'Retrieved learning memory: mastery, misconceptions, and prior summaries.')
-    return deepcopy(row.data) if row else StudentData().model_dump(mode='json')
+    if not row:
+        return StudentData().model_dump(mode='json')
+    data = deepcopy(row.data)
+    data['mastery'] = normalize_mastery(data.get('mastery', {}))
+    return data
 
 
 def update_long_term_memory(db, user_id: int, updates: dict) -> dict:

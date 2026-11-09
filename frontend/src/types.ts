@@ -55,7 +55,8 @@ export type Session = {
 };
 export type Study = {
   type: 'study_state'; state: Session; graph: Graph; mastery_target: number;
-  material: { id: string; name: string; chunks: { id: string; text: string }[] };
+  material: { id: string; name: string; sources?: string[]; origin?: 'upload' | 'web'; topic?: string;
+    web_sources?: { title: string; url: string; concept?: string }[]; chunks: { id: string; source?: string; url?: string; text: string }[] };
 };
 export type Tool = 'hint' | 'explanation' | 'highlight' | 'visualization' | 'guiding_question';
 export type Result = {

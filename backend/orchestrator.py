@@ -1,7 +1,7 @@
 """Python routing with snapshot checks before committing teaching output."""
 from copy import deepcopy
 from sqlalchemy import select
-from . import hypothesis, plans, activity, assessment, config, knowledge, memory, observer, planner, reflection, student_model, tools, tutor, utils
+from . import hypothesis, plans, activity, assessment, memory, observer, planner, reflection, student_model, tools, tutor, utils
 from .response import Response, response_for, content_key, has_content
 from .logging_setup import event as log_event
 from .db import Event, Session, append_event

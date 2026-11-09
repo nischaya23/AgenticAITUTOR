@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import AsyncMock
 import pytest
-from backend import main, memory, knowledge, tools, orchestrator
+from backend import main, memory, tools, orchestrator
 from backend.db import Session
 
 
@@ -150,7 +150,7 @@ def test_review_without_issues_still_validates():
 
 
 async def test_live_grading_calls_llm_even_for_exact_answer(monkeypatch):
-    from backend import assessment, config, utils
+    from backend import assessment, utils
     mock = AsyncMock(return_value=assessment.Assessment(correct=True,score=1,
         reason='Equivalent answer accepted.',misconceptions=[]))
     monkeypatch.setattr(utils, 'call_llm', mock)

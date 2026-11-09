@@ -249,6 +249,30 @@ Policy parameters persist across sessions and restarts in `student_state.data`.
 `observe`, `vector`, `scores`, and `update_policy` are the replacement boundary
 for a future trained estimator; no GRU or pretrained weights are required.
 
+## Studying from the web
+
+Instead of uploading files you can type a topic into **Study a topic from the web** and press
+**Search web**. `backend/websearch.py` collects pages for the topic, the concept graph is built from
+them exactly as for uploads, and the material panel links every source page. You can also select up
+to 10 PDF/TXT/MD files at once to build one combined graph.
+
+While you study, if neither uploaded nor web material has a passage for the current concept, the
+question generator searches the web once for that concept, adds the pages to the material, and
+cites them.
+
+Configure in `.env`:
+
+```dotenv
+WEB_SEARCH_PROVIDER=free   # free: Wikipedia + DuckDuckGo, no key; gemini: Google Search grounding
+                           # (falls back to free if it fails); off: disable web search
+WEB_SEARCH_MAX_PAGES=4
+WEB_SEARCH_TIMEOUT=15
+```
+
+Fetched pages are treated as untrusted source text. Only public http(s) addresses are fetched
+(private, loopback and link-local hosts are refused, including after redirects), and each page is
+limited to 1.5 MB.
+
 ## Knowledge ingestion
 
 Upload UTF-8 TXT, Markdown, or text-based PDF files up to 8 MiB. PDF extraction

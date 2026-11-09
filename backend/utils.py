@@ -42,6 +42,20 @@ class SessionData(BaseModel):
     ended: bool = False
 
 
+def normalize_mastery(values) -> dict[str, float]:
+    """Accept saved mastery numbers, converting legacy {a, b} records and dropping unreadable ones."""
+    result = {}
+    for name, value in (values or {}).items() if isinstance(values, dict) else ():
+        if isinstance(value, dict):
+            a, b = value.get('a'), value.get('b')
+            if not all(isinstance(x, (int, float)) and x >= 0 for x in (a, b)) or a + b <= 0:
+                continue
+            value = a / (a + b)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            result[str(name)] = round(max(0.0, min(1.0, float(value))), 4)
+    return result
+
+
 class StudentData(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mastery: dict[str, float] = Field(default_factory=dict)
