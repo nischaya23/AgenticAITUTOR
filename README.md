@@ -42,7 +42,7 @@ as hashes in SQLite and sent in an HttpOnly, SameSite cookie that expires after
 seven days. Set `COOKIE_SECURE=true` when serving over HTTPS. The local HTTP
 setup uses `COOKIE_SECURE=false`.
 
-Vite login/signup allows `http://localhost:5173` and `http://127.0.0.1:5173`; restart FastAPI after changing allowed origins in `backend/main.py`.
+Vite login/signup allows `http://localhost:5173` and `http://127.0.0.1:5173`; set `CORS_ORIGINS` in `.env` for other origins, then restart FastAPI.
 
 On startup, the app automatically adds the password column and the login and
 material ownership tables to existing databases. Existing anonymous sessions and

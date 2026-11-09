@@ -8,8 +8,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.cors import CORSMiddleware
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import delete, select
@@ -22,7 +22,6 @@ SOCKETS: dict[int, set] = defaultdict(set)
 TASKS: dict[int, set] = defaultdict(set)
 LOCKS: dict[int, asyncio.Lock] = {}
 LOG = logging.getLogger('tutor')
-ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 DRAFTS = None
 
 
@@ -121,6 +120,10 @@ def session_log_uuid(session_id):
         return row.state['log_uuid']
 
 
+def allowed_browser_origin(origin: str | None, host: str | None) -> bool:
+    return not origin or origin in config.CORS_ORIGINS or origin in (f'http://{host}', f'https://{host}')
+
+
 @app.middleware('http')
 async def request_logging(request, call_next):
     parts = request.url.path.split('/')
@@ -133,7 +136,7 @@ async def request_logging(request, call_next):
     if request.url.path.startswith('/api/'):
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
             origin = request.headers.get('origin')
-            if origin and origin not in ALLOWED_ORIGINS and origin.removeprefix('http://').removeprefix('https://') != request.headers.get('host'):
+            if not allowed_browser_origin(origin, request.headers.get('host')):
                 return JSONResponse({'detail': 'Cross-origin requests are not allowed.'}, status_code=403)
         public = {'/api/health', '/api/auth/login', '/api/auth/signup', '/api/auth/me'}
         if request.url.path not in public:
@@ -166,13 +169,10 @@ async def request_logging(request, call_next):
             raise
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=['GET', 'POST', 'PUT'],
-    allow_headers=['Content-Type'],
-)
+# Wrap the auth/origin middleware so preflight works without a login cookie and
+# allowed browser origins can read both successful and rejected API responses.
+app.add_middleware(CORSMiddleware, allow_origins=list(config.CORS_ORIGINS),
+    allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
 
 
 @app.get('/')
@@ -715,9 +715,9 @@ async def emit_activity(sid, items):
 
 @app.websocket('/ws/{session_id}')
 async def websocket(socket: WebSocket, session_id: int):
-    # Allow the Vite frontend and same-origin browser connections.
+    # Use the same trusted dev origins for HTTP and authenticated sockets.
     origin = socket.headers.get('origin')
-    if origin and origin not in ALLOWED_ORIGINS and origin.removeprefix('http://').removeprefix('https://') != socket.headers.get('host'):
+    if not allowed_browser_origin(origin, socket.headers.get('host')):
         await socket.close(code=1008)
         return
     with SessionLocal() as db:
