@@ -19,7 +19,9 @@ _handler = None
 
 def serializable(value):
     if hasattr(value, 'model_dump'):
-        return value.model_dump(mode='json')
+        # SDK generic responses can declare parsed=None yet contain a runtime
+        # Pydantic model. Serialize its actual type to preserve it without warnings.
+        return value.model_dump(mode='json', serialize_as_any=True)
     if hasattr(value, '__dict__'):
         return vars(value)
     return str(value)

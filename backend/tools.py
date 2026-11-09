@@ -180,9 +180,39 @@ class Problem(utils.Schema):
             raise ValueError('Diagram interpretation requires a question diagram.')
         return self
 
+
+class GeminiProblem(utils.Schema):
+    """A shallow wire schema; diagrams are validated locally after decoding.
+
+    Gemini's compatibility endpoint rejects the nested Problem schema. Keep
+    this transport format separate from the public question representation.
+    """
+    prompt: str
+    concept: str
+    expected_answer: str
+    rubric: str
+    format: Literal['explanation', 'trace', 'diagram_interpretation', 'diagram_construction']
+    diagnostic_focus: str
+    diagram_json: str
+    starter_diagram_json: str
+
+    def to_problem(self) -> Problem:
+        return Problem.model_validate({
+            **self.model_dump(exclude={'diagram_json', 'starter_diagram_json'}),
+            'diagram': Diagram.model_validate_json(self.diagram_json).model_dump() if self.diagram_json.strip() else None,
+            'starter_diagram': Diagram.model_validate_json(self.starter_diagram_json).model_dump() if self.starter_diagram_json.strip() else None,
+        })
+
+
 async def generate_problem(concept: str, sources: list[dict] | None=None, previous_prompts: list[str] | None=None, plan: dict | None=None, plan_version: int=0, hypotheses: list[dict] | None=None, hypothesis_version: int=0, eligible_concepts: list[str] | None=None, recent_formats: list[str] | None=None) -> dict:
     log_event('question.generate', plan_version=plan_version, hypothesis_version=hypothesis_version)
-    problem = await utils.call_llm(prompts.GENERATE_QUESTION, {'concept': concept, 'sources': sources if sources is not None else retrieve_knowledge(concept), 'recent_questions': (previous_prompts or [])[-6:], 'plan': plan or {}, 'plan_version': plan_version,
+    gemini = config.LLM_PROVIDER == 'gemini'
+    problem = await utils.call_llm(prompts.GENERATE_QUESTION_GEMINI if gemini else prompts.GENERATE_QUESTION, {'concept': concept, 'sources': sources if sources is not None else retrieve_knowledge(concept), 'recent_questions': (previous_prompts or [])[-6:], 'plan': plan or {}, 'plan_version': plan_version,
         'hypotheses': hypotheses or [], 'hypothesis_version': hypothesis_version,
-        'eligible_concepts': eligible_concepts or [concept], 'recent_formats': (recent_formats or [])[-6:]}, schema=Problem, operation='GENERATE_QUESTION')
+        'eligible_concepts': eligible_concepts or [concept], 'recent_formats': (recent_formats or [])[-6:]}, schema=GeminiProblem if gemini else Problem, operation='GENERATE_QUESTION')
+    if gemini:
+        try:
+            problem = problem.to_problem()
+        except ValueError as exc:
+            raise ValueError('The model returned an invalid question diagram. Please retry.') from exc
     return {**problem.model_dump(), 'concept': concept, 'id': uuid.uuid4().hex}

@@ -352,6 +352,13 @@ do not block grading. New plan JSON fields require no database migration.
 
 ## Unified responses and possible knowledge gaps
 
+Gemini question generation uses a shallow provider schema with diagrams encoded
+as JSON strings. The server decodes these into the same validated question diagrams
+used by other providers; graph limits and endpoint validation still apply. This
+avoids the HTTP 400 returned by Gemini's compatibility endpoint for the nested
+question schema. Provider failures during study setup return readable retry
+messages and preserve any saved material and learning plan.
+
 The **Your response** workspace submits text and an optional editable React Flow
 node-and-arrow diagram together. Nodes can be renamed, moved, connected, or
 deleted using the canvas or labeled keyboard controls. Diagrams are limited to

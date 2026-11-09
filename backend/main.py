@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
@@ -59,6 +59,29 @@ async def lifespan(app):
 app = FastAPI(title='Agentic AI Tutor', lifespan=lifespan)
 FRONTEND_BUILD = config.ROOT / 'frontend' / 'dist'
 app.mount('/assets', StaticFiles(directory=FRONTEND_BUILD / 'assets', check_dir=False), name='assets')
+
+
+@app.exception_handler(APIStatusError)
+async def provider_http_error(request, exc):
+    logs.event('http.provider_failed', provider=config.LLM_PROVIDER, status=exc.status_code)
+    if exc.status_code == 429:
+        detail = f'{config.LLM_PROVIDER.title()} rate or quota limit reached (HTTP 429). Please retry later.'
+    elif exc.status_code >= 500:
+        detail = f'{config.LLM_PROVIDER.title()} is temporarily unavailable (HTTP {exc.status_code}). Please retry shortly.'
+    else:
+        detail = f'{config.LLM_PROVIDER.title()} rejected the model request (HTTP {exc.status_code}). ' \
+                 'Please retry. If this continues, check the model and provider settings.'
+    return JSONResponse(status_code=503 if exc.status_code == 429 or exc.status_code >= 500 else 502,
+        content={'detail': detail})
+
+
+@app.exception_handler(APIConnectionError)
+async def provider_connection_error(request, exc):
+    timeout = isinstance(exc, APITimeoutError)
+    logs.event('http.provider_failed', provider=config.LLM_PROVIDER, error=type(exc).__name__)
+    return JSONResponse(status_code=504 if timeout else 502,
+        content={'detail': 'The model provider took too long to respond. Please retry.' if timeout
+                 else 'Could not connect to the model provider. Check the connection and retry.'})
 
 
 def observer_status(state):
