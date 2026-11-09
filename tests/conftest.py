@@ -5,8 +5,11 @@ from sqlalchemy.orm import sessionmaker
 from backend import config, db, main, utils
 
 
+REAL_CALL_LLM = utils.call_llm
+
 @pytest.fixture
 def app_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, 'LLM_PROVIDER', 'openai')
     engine = create_engine(f'sqlite:///{tmp_path / "test.db"}', connect_args={'check_same_thread': False})
     event.listen(engine, 'connect', db.sqlite_setup)
     factory = sessionmaker(engine, expire_on_commit=False)
@@ -14,7 +17,15 @@ def app_env(tmp_path, monkeypatch):
     monkeypatch.setattr(db, 'SessionLocal', factory)
     monkeypatch.setattr(main, 'SessionLocal', factory)
     monkeypatch.setattr(config, 'DATA_DIR', tmp_path / 'data')
-    monkeypatch.setattr(config, 'DEMO_MODE', True)
+    from model_fixtures import mock_llm
+    from backend import assessment
+    monkeypatch.setattr(utils, 'call_llm', mock_llm)
+    async def mock_assess(problem, answer, context, reasoning=False):
+        if reasoning:
+            return dict(correct=False,score=.5,verified=False,reason='Provisional reasoning.',misconceptions=[])
+        correct=(answer['text'] if isinstance(answer,dict) else answer).strip()==problem.get('expected_answer')
+        return dict(correct=correct,score=float(correct),verified=True,reason='Test reference.',misconceptions=[])
+    monkeypatch.setattr(assessment, 'evaluate_attempt', mock_assess)
     utils.METRICS.clear()
     with TestClient(main.app) as client:
         yield client, factory, engine

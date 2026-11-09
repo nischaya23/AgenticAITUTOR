@@ -37,3 +37,23 @@
 .student-message{margin-top:14px;padding:12px;background:#f6f2e8;border-radius:8px;overflow-wrap:anywhere}
 .student-message p{white-space:pre-wrap;margin:4px 0 0}
 .scene-canvas{width:100%;aspect-ratio:16 / 9;background:#fafcf9;box-shadow:inset 0 0 0 1px #dce7d4;border-radius:8px;overflow:hidden}
+
+.response-workspace{border:1px solid #d7e1d2;border-radius:8px;padding:12px;min-width:0}
+.response-workspace details{margin-top:12px;padding-top:12px}
+#answer-form{margin-top:14px}
+.diagram{min-width:0;margin:12px 0}
+.diagram button{padding:7px 10px;font-size:12px;white-space:normal}
+.diagram label:not(.upload){margin:6px 0;font-size:12px}
+.diagram select{display:block;max-width:100%;width:100%;padding:8px;border:1px solid #d7e1d2;border-radius:6px;background:white}
+.diagram-connect{display:flex;align-items:end;gap:8px;flex-wrap:wrap}
+.diagram-connect label{flex:1;min-width:100px}
+.diagram-nodes{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px}
+.diagram-nodes>li{padding:10px;border:1px solid #d7e1d2;border-radius:7px;min-width:0}
+.diagram input{padding:7px}
+.node-controls{display:flex;gap:6px;align-items:end;flex-wrap:wrap}.node-controls label{flex:1;min-width:60px}.node-controls button{margin-bottom:6px}
+.flow .react-flow__node-default.diagram-issue,.diagram li.diagram-issue{border:2px solid #b32335;outline:1px solid #b32335}
+.issue-reason{color:#a01c2d;font-size:12px;overflow-wrap:anywhere}
+.hypotheses{margin:20px 0;padding:16px;background:#f7f8f2;border:1px solid #d7e1d2;border-radius:8px;overflow-wrap:anywhere}
+.hypotheses h2{font-size:18px;margin:0 0 10px}.hypotheses ul{padding-left:18px}.hypotheses li{margin:10px 0}.hypotheses p{font-size:12px;line-height:1.5}.hypotheses strong{font-size:13px}
+
+.learning-plan{margin:20px 0;padding:18px;border:1px solid #d7e1d2;border-radius:8px;background:#fbfcf9;overflow-wrap:anywhere}.learning-plan h2{margin:0 0 12px}.learning-plan li{margin-bottom:6px}.plan-edit-row,.plan-controls{display:flex;gap:8px;margin:8px 0}.learning-plan fieldset{min-width:0;margin:12px 0;border:1px solid #d7e1d2}.learning-plan button{padding:8px 12px;font-size:12px}.plan-suggestion{margin-top:14px;border-top:1px solid #d7e1d2;padding-top:12px}.plan-suggestion button{margin-right:8px}@media(max-width:500px){.plan-edit-row{flex-wrap:wrap}}

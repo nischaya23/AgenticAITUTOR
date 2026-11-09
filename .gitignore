@@ -9,3 +9,5 @@ frontend/dist/
 data/materials/*.json
 data/materials/*.pdf
 data/materials/*.txt
+
+tmp/

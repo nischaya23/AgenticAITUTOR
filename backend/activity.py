@@ -1,5 +1,7 @@
 """Request-local activity summaries; never include private memory contents."""
 from contextvars import ContextVar
+from contextlib import contextmanager
+from . import logging_setup as logs
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -7,6 +9,7 @@ CURRENT = ContextVar('memory_activity', default=None)
 
 
 def record(kind: str, message: str):
+    logs.event('learning.' + kind, summary=message)
     items = CURRENT.get()
     if items is None:
         return
@@ -29,3 +32,13 @@ def group(job, operation, items):
     return dict(id=f"{job['event_id']}:{operation}", call_id=job['event_id'],
                 kind='operation', operation=operation, sections=sections,
                 message=' '.join(f"{k.replace('_', ' ')}: {v}" for k, v in sections.items()))
+
+
+@contextmanager
+def collect(enabled=True):
+    items = []
+    token = CURRENT.set(items if enabled else None)
+    try:
+        yield items
+    finally:
+        CURRENT.reset(token)

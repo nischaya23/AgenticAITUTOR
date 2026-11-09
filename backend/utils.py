@@ -1,20 +1,17 @@
-"""Shared validation and bounded, metered OpenAI Responses calls."""
+"""Shared validation, model clients, provider adapters, and metrics."""
 import asyncio
 import json
 import time
+from types import SimpleNamespace
 from collections import Counter
 from functools import lru_cache
 from typing import Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from types import SimpleNamespace
-from . import config
+from . import config, prompts, logging_setup as logs
+from .response import Schema, Response
 
 METRICS = Counter()
-
-
-class Schema(BaseModel):
-    model_config = ConfigDict(extra='forbid')
 
 
 class ClientEvent(Schema):
@@ -28,17 +25,20 @@ class ClientEvent(Schema):
     proactive_enabled: bool | None = None
     problem_id: str | None = Field(default=None, max_length=100)
     assessment_mode: Literal['answer', 'reasoning'] = 'answer'
+    response: Response | None = None
 
 
 class SessionData(BaseModel):
     model_config = ConfigDict(extra='allow')
-    current_concept: str = Field(default='Binary Search', max_length=200)
+    current_concept: str = Field(default='', max_length=200)
     current_problem: dict[str, JsonValue] = Field(default_factory=dict)
     plan: dict[str, JsonValue] = Field(default_factory=dict)
     observer: dict[str, JsonValue] = Field(default_factory=dict)
     revision: int = 0
     proactive_enabled: bool = True
     workspace: str = Field(default='', max_length=20000)
+    response: Response | None = None
+    response_revision: int = 0
     ended: bool = False
 
 
@@ -50,6 +50,7 @@ class StudentData(BaseModel):
     learning_goals: list[str] = Field(default_factory=list)
     effective_interventions: dict[str, JsonValue] = Field(default_factory=dict)
     policy: dict[str, JsonValue] = Field(default_factory=dict)
+    hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=8)
 
 
 @lru_cache
@@ -60,13 +61,13 @@ def get_client() -> AsyncOpenAI:
 
         return AsyncOpenAI(api_key=config.GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", timeout=config.API_TIMEOUT, max_retries=2,)
     if not config.OPENAI_API_KEY:
-        raise RuntimeError('Add OPENAI_API_KEY to .env, or set DEMO_MODE=true for the offline demo.')
+        raise RuntimeError('Configure OPENAI_API_KEY in .env.')
     return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=config.API_TIMEOUT, max_retries=2)
 
 
 
 
-async def call_llm(
+async def _call_llm(
     instructions: str,
     input_data,
     model: str | None = None,
@@ -101,7 +102,7 @@ async def call_llm(
         if len(payload) > config.MAX_INPUT_CHARS:
             payload = (
                 payload[:config.MAX_INPUT_CHARS]
-                + "\n[Context truncated to input budget.]"
+                + prompts.CONTEXT_TRUNCATED
             )
 
         timeout = config.API_TIMEOUT * 3 + 5
@@ -124,6 +125,7 @@ async def call_llm(
                 **kwargs,
             )
 
+            logs.event('llm.request', prompt=operation, provider=provider, request=args, schema=schema.model_json_schema() if schema else None)
             request = (
                 client.responses.parse(**args, text_format=schema)
                 if schema is not None
@@ -131,6 +133,7 @@ async def call_llm(
             )
 
             response = await asyncio.wait_for(request, timeout=timeout)
+            logs.event('llm.response', prompt=operation, response=response)
 
             if response.usage:
                 METRICS["input_tokens"] += response.usage.input_tokens
@@ -199,6 +202,7 @@ async def call_llm(
 
                 args["tool_choice"] = tool_choice
 
+        logs.event('llm.request', prompt=operation, provider=provider, request=args, schema=schema.model_json_schema() if schema else None)
         request = (
             client.chat.completions.parse(
                 **args,
@@ -209,6 +213,7 @@ async def call_llm(
         )
 
         response = await asyncio.wait_for(request, timeout=timeout)
+        logs.event('llm.response', prompt=operation, response=response)
 
         if response.usage:
             METRICS["input_tokens"] += (
@@ -260,17 +265,30 @@ async def call_llm(
 
         return message.content
 
-    except Exception:
+    except Exception as exc:
         METRICS["llm_errors"] += 1
-        # Keep any detailed failure logging you added here.
+        logs.event('llm.failed', prompt=operation, error=type(exc).__name__)
         raise
 
     finally:
+        logs.event('llm.complete', prompt=operation, duration_ms=round((time.perf_counter()-started)*1000, 2))
         METRICS["api_latency_ms"] += round(
             (time.perf_counter() - started) * 1000,
             2,
         )
 
 
+
 def now() -> float:
     return time.time()
+
+
+# Draft and foreground calls share the same provider budget, including tool calls.
+_PROVIDER_LIMITS = {}
+
+
+async def call_llm(*args, **kwargs):
+    loop = asyncio.get_running_loop()
+    limiter = _PROVIDER_LIMITS.setdefault(loop, asyncio.Semaphore(config.PROVIDER_CONCURRENCY))
+    async with limiter:
+        return await _call_llm(*args, **kwargs)

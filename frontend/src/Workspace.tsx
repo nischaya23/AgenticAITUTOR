@@ -58,7 +58,7 @@ export default function Workspace({ initial, disabled, annotations, onEdit, canA
         EditorState.changeFilter.of(transaction => !transaction.docChanged
           || Array.from(transaction.newDoc.toString()).length <= 20000),
         editable.current.of([EditorView.editable.of(false), EditorState.readOnly.of(true)]),
-        EditorView.contentAttributes.of({ 'aria-label': 'Your reasoning' }),
+        EditorView.contentAttributes.of({ 'aria-label': 'Your response text' }),
         EditorView.updateListener.of(update => {
           if (update.docChanged) callbacks.current.onEdit(update.state.doc.toString());
         })],

@@ -1,6 +1,8 @@
 """Local single-user FastAPI application; background agent jobs keep WS input live."""
 import asyncio
 import logging
+import time
+from uuid import uuid4
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,23 +13,36 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import select
-from . import activity, config, knowledge, memory, observer, orchestrator, tools, utils
+from . import logging_setup as logs
+from . import hypothesis, plans, activity, config, knowledge, memory, observer, orchestrator, tools, utils
+from .response import Response, response_for
 from .db import Session, Event, Concept, ConceptEdge, SessionLocal, init_db, local_user, append_event
 
 SOCKETS: dict[int, set] = defaultdict(set)
 TASKS: dict[int, set] = defaultdict(set)
 LOCKS: dict[int, asyncio.Lock] = {}
 LOG = logging.getLogger('tutor')
+DRAFTS = None
 
 
 @asynccontextmanager
 async def lifespan(app):
+    global DRAFTS
+    logs.setup()
     init_db()
+    DRAFTS = hypothesis.DraftScheduler(SessionLocal, broadcast, track_task)
     with SessionLocal.begin() as db:
-        knowledge.seed_knowledge(db)
         for row in db.scalars(select(Session)):
             if row.state.get('observer', {}).get('pending_wake'):
                 orchestrator.clear_pending_wake(db, row.id)
+            if row.state.get('assessment_pending'):
+                row.state = {**row.state, 'assessment_pending': False,
+                    'assessment_stages': {k: 'unavailable' if v in ('analyzing', 'waiting') else v
+                        for k, v in row.state.get('assessment_stages', {}).items()}}
+            panel = row.state.get('hypothesis_state', {})
+            if panel.get('status') == 'analyzing':
+                row.state = {**row.state, 'hypothesis_state': {**panel, 'status': 'unavailable',
+                    'error': 'Analysis interrupted. Edit your response to analyze again.'}}
     yield
     pending = [t for group in TASKS.values() for t in group]
     for task in pending:
@@ -36,6 +51,9 @@ async def lifespan(app):
     SOCKETS.clear()
     TASKS.clear()
     LOCKS.clear()
+    utils._PROVIDER_LIMITS.pop(asyncio.get_running_loop(), None)
+    DRAFTS = None
+    logs.shutdown()
 
 
 app = FastAPI(title='Agentic AI Tutor', lifespan=lifespan)
@@ -56,7 +74,9 @@ def observer_status(state):
 
 
 def public_state(state: dict) -> dict:
-    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k != 'observer'},
+    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k not in ('observer', 'log_uuid')},
+        'response': response_for(state), 'response_revision': state.get('response_revision', 0),
+        'hypothesis_state': hypothesis.view(state),
         'current_problem': {k: v for k, v in state.get('current_problem', {}).items()
                             if k not in ('expected_answer', 'rubric')}}
 
@@ -66,6 +86,36 @@ def require_session(db, session_id: int):
     if row is None:
         raise HTTPException(404, 'Session not found.')
     return row
+
+
+def session_log_uuid(session_id):
+    with SessionLocal.begin() as db:
+        row = require_session(db, session_id)
+        if not row.state.get('log_uuid'):
+            row.state = {**row.state, 'log_uuid': uuid4().hex}
+        return row.state['log_uuid']
+
+
+@app.middleware('http')
+async def request_logging(request, call_next):
+    parts = request.url.path.split('/')
+    sid = int(parts[3]) if len(parts) > 3 and parts[1:3] == ['api', 'sessions'] and parts[3].isdigit() else None
+    uid = None
+    if sid is not None:
+        try:
+            uid = session_log_uuid(sid)
+        except HTTPException:
+            sid = None
+    with logs.scope(sid, uid):
+        started = time.perf_counter()
+        logs.event('http.start', method=request.method, path=request.url.path)
+        try:
+            response = await call_next(request)
+            logs.event('http.complete', status=response.status_code, duration_ms=round((time.perf_counter()-started)*1000,2))
+            return response
+        except Exception as exc:
+            logs.event('http.failed', error=type(exc).__name__)
+            raise
 
 
 @app.get('/')
@@ -79,24 +129,22 @@ def frontend():
 @app.get('/api/health')
 def health():
     key = config.GEMINI_API_KEY if config.LLM_PROVIDER == 'gemini' else config.OPENAI_API_KEY
-    return {'status': 'ok', 'demo_mode': config.DEMO_MODE, 'configured': bool(key)}
+    return {'status': 'ok', 'provider': config.LLM_PROVIDER, 'model': config.GEMINI_MODEL if config.LLM_PROVIDER == 'gemini' else config.OPENAI_MODEL, 'configured': bool(key)}
 
 
 @app.post('/api/sessions')
 def create_session():
     with SessionLocal.begin() as db:
         user = local_user(db)
-        state = utils.SessionData(current_problem={
-            'id': 'binary-search-first', 'concept': 'Binary Search',
-            'prompt': 'For [1, 2, 2, 2, 5], give the zero-based index of the first occurrence of 2. Enter only the index.',
-            'expected_answer': '1', 'rubric': 'First matching value is at zero-based index 1.'},
-            observer={'problem_started_at': utils.now(), 'last_progress_at': utils.now(),
-                      'last_action_at': utils.now()}).model_dump(mode='json')
+        state = utils.SessionData(log_uuid=uuid4().hex).model_dump(mode='json')
+        state['assessed_hypotheses'] = memory.get_long_term_memory(db, user.id).get('hypotheses', [])
         row = Session(user_id=user.id, state=state)
         db.add(row)
         db.flush()
-        memory.update_long_term_memory(db, user.id, {})
-        append_event(db, row.id, 'session_started', {'concept': 'Binary Search'})
+        with logs.scope(row.id, state['log_uuid']):
+            memory.update_long_term_memory(db, user.id, {})
+            append_event(db, row.id, 'session_started', {})
+            logs.event('session.created')
         return {'id': row.id, 'state': public_state(state)}
 
 
@@ -124,13 +172,20 @@ class ProblemRequest(utils.Schema):
 
 @app.post('/api/sessions/{session_id}/problem')
 async def new_problem(session_id: int, request: ProblemRequest):
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        return await _new_problem(session_id, request)
+
+
+async def _new_problem(session_id: int, request: ProblemRequest):
     with SessionLocal() as db:
         initial = require_session(db, session_id).state
         if initial['ended']:
             raise HTTPException(409, 'Start a new session first.')
         revision = initial['revision']
     try:
-        problem = await tools.generate_problem(request.concept)
+        problem = await tools.generate_problem(request.concept, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
+            hypotheses=hypothesis.eligible(initial), hypothesis_version=initial.get('hypothesis_state', {}).get('version', 0),
+            recent_formats=initial.get('recent_formats', []), previous_prompts=initial.get('recent_questions', []))
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     with SessionLocal.begin() as db:
@@ -138,11 +193,16 @@ async def new_problem(session_id: int, request: ProblemRequest):
         state = dict(row.state)
         if state['ended'] or state['revision'] != revision:
             raise HTTPException(409, 'Work changed while generating a problem; try again.')
-        state.update(current_problem=problem, current_concept=request.concept, workspace='', plan={},
+        state.update(current_problem=problem, current_concept=request.concept, workspace='',
+                     response=Response(diagram=problem.get('starter_diagram') or {}).model_dump(),
+                     response_revision=state.get('response_revision', 0)+1, assessment_pending=False,
+                     plan=state.get('plan', {}) if state.get('material_id') else {},
                      revision=state['revision']+1, observer={})
         orchestrator.persist_observation(db, row, state, 'student_action', {'action': 'problem_opened'})
         append_event(db, session_id, 'student_action', {'action': 'problem_opened', 'problem_id': problem['id']})
         result = {'type': 'state', 'state': public_state(state)}
+    if DRAFTS:
+        DRAFTS.cancel(session_id)
     await broadcast(session_id, result)
     return result
 
@@ -201,6 +261,7 @@ def select_study_concept(graph: dict, mastery: dict) -> str | None:
 
 async def advance_study(session_id: int) -> dict | None:
     """Called under the session job lock; event ingestion stays responsive."""
+    await plans.ensure(session_id, SessionLocal)
     with SessionLocal() as db:
         row = require_session(db, session_id)
         state = memory.get_short_term_memory(db, session_id)
@@ -211,6 +272,9 @@ async def advance_study(session_id: int) -> dict | None:
         concept = select_study_concept(material['graph'], mastery)
         revision = state['revision']
         recent = state.get('recent_questions', [])
+        eligible = [name for name in material['graph']['concepts'] if all(
+            mastery.get(e['prerequisite'], 0) >= MASTERY_TARGET
+            for e in material['graph']['prerequisites'] if e['concept'] == name)]
     if concept is None:
         with SessionLocal.begin() as db:
             state = memory.get_short_term_memory(db, session_id)
@@ -220,20 +284,27 @@ async def advance_study(session_id: int) -> dict | None:
             return study_snapshot(db, session_id)
     sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, state['material_id'])
     sources = sources or material['chunks'][:3]
-    problem = await tools.generate_problem(concept, sources=sources, previous_prompts=recent)
+    problem = await tools.generate_problem(concept, sources=sources, previous_prompts=recent, plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
+        hypotheses=hypothesis.eligible(state), hypothesis_version=state.get('hypothesis_state', {}).get('version', 0),
+        eligible_concepts=eligible, recent_formats=state.get('recent_formats', []))
     with SessionLocal.begin() as db:
         row = require_session(db, session_id)
         current = memory.get_short_term_memory(db, session_id)
-        if current['revision'] != revision or current['ended']:
+        if current['revision'] != revision or current['ended'] or current.get('plan_version', 0) != state.get('plan_version', 0):
             return None
         temporal = {k: v for k, v in current.get('observer', {}).items()
                     if k in ('last_intervention_at', 'hint_times')}
-        current.update(current_concept=concept, current_problem=problem, workspace='', plan={},
+        current.update(current_concept=concept, current_problem=problem, workspace='',
+                       response=Response(diagram=problem.get('starter_diagram') or {}).model_dump(),
+                       response_revision=current.get('response_revision', 0)+1, assessment_pending=False,
+                       question_generation_error=None, recent_formats=(current.get('recent_formats', [])+[problem.get('format', 'explanation')])[-6:],
                        observer=temporal, revision=revision+1, study_complete=False,
                        recent_questions=(recent+[problem['prompt']])[-6:])
         orchestrator.persist_observation(db, row, current, 'student_action', {'action': 'problem_opened'})
         append_event(db, session_id, 'student_action',
                      {'action': 'problem_opened', 'problem_id': problem['id'], 'concept': concept})
+        if DRAFTS:
+            DRAFTS.cancel(session_id)
         return study_snapshot(db, session_id)
 
 
@@ -254,20 +325,63 @@ async def start_study(session_id: int, request: StudyRequest):
                     raise HTTPException(409, 'Start a new session first.')
                 if row.state.get('material_id') not in (None, request.material_id):
                     raise HTTPException(409, 'Use a new session for different material.')
-                if row.state.get('material_id'):
-                    if row.state.get('study_complete') or (row.state['current_problem'] and
-                        not row.state['current_problem'].get('solved')):
-                        return study_snapshot(db, session_id)
-                else:
+                if not row.state.get('material_id'):
                     memory.update_short_term_memory(db, session_id, {
                         'material_id': request.material_id, 'current_problem': {}, 'current_concept': '',
                         'workspace': '', 'observer': {}, 'plan': {}, 'revision': row.state['revision']+1})
+            await plans.ensure(session_id, SessionLocal)
+            with SessionLocal() as db:
+                state = require_session(db, session_id).state
+                if state.get('study_complete') or (state.get('current_problem') and not state['current_problem'].get('solved')):
+                    return study_snapshot(db, session_id)
             result = await advance_study(session_id)
             if result is None:
                 raise HTTPException(409, 'Session changed during setup. Upload again to start a new session.')
             return result
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+
+@app.put('/api/sessions/{session_id}/plan')
+async def edit_plan(session_id: int, request: plans.Update):
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        with SessionLocal.begin() as db:
+            row = require_session(db, session_id)
+            state = row.state
+            if state['ended'] or not state.get('material_id'):
+                raise HTTPException(409, 'No active material to plan.')
+            if state.get('plan_version', 0) != request.expected_version:
+                raise HTTPException(409, 'Plan changed. Review the latest saved plan and retry.')
+            plan = request.plan.model_dump()
+            memory.update_short_term_memory(db, session_id, dict(plan=plan,
+                plan_version=request.expected_version+1, plan_suggestion=None))
+            append_event(db, session_id, 'plan_edited', {'plan': plan, 'plan_version': request.expected_version+1})
+            result = plans.view(row.state)
+        logs.event('plan.edited', plan_version=result['plan_version'])
+        await broadcast(session_id, result)
+        return result
+
+
+@app.post('/api/sessions/{session_id}/plan/suggestion')
+async def act_on_plan_suggestion(session_id: int, request: plans.SuggestionAction):
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        with SessionLocal.begin() as db:
+            row = require_session(db, session_id)
+            state = row.state
+            suggestion = state.get('plan_suggestion')
+            if state['ended'] or not state.get('material_id'):
+                raise HTTPException(409, 'No active material to plan.')
+            if (state.get('plan_version', 0) != request.expected_version or not suggestion
+                    or suggestion['id'] != request.suggestion_id or suggestion['base_version'] != request.expected_version):
+                raise HTTPException(409, 'Suggestion changed. Review the latest plan.')
+            plan = suggestion['plan'] if request.action == 'accept' else state['plan']
+            memory.update_short_term_memory(db, session_id, dict(plan=plan,
+                plan_version=request.expected_version+1, plan_suggestion=None))
+            append_event(db, session_id, 'plan_suggestion_'+request.action, {'suggestion_id': suggestion['id'], 'plan_version': request.expected_version+1})
+            result = plans.view(row.state)
+        logs.event('plan.suggestion.'+request.action, plan_version=result['plan_version'])
+        await broadcast(session_id, result)
+        return result
 
 
 class SkipRequest(utils.Schema):
@@ -288,6 +402,23 @@ async def skip_question(session_id: int, request: SkipRequest):
             raise HTTPException(409, 'Your work changed. Try skipping again.')
         with SessionLocal.begin() as db:
             append_event(db, session_id, 'question_skipped', {'problem_id': request.problem_id})
+        await broadcast(session_id, result)
+        return result
+
+
+@app.post('/api/sessions/{session_id}/next')
+async def retry_next_question(session_id: int, request: SkipRequest):
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        with SessionLocal() as db:
+            state = require_session(db, session_id).state
+            if state.get('ended') or not state.get('material_id') or not state['current_problem'].get('solved') or state['current_problem'].get('id') != request.problem_id:
+                raise HTTPException(409, 'No assessed question awaiting progression.')
+        try:
+            result = await advance_study(session_id)
+        except Exception as exc:
+            raise HTTPException(503, 'Next question unavailable. Your assessment is saved; retry when ready.') from exc
+        if result is None:
+            raise HTTPException(409, 'Work changed while preparing the question. Retry when ready.')
         await broadcast(session_id, result)
         return result
 
@@ -323,7 +454,12 @@ async def broadcast(session_id: int, data: dict):
             SOCKETS[session_id].discard(socket)
 
 
-async def run_job(job: dict):
+def track_task(sid, task):
+    TASKS[sid].add(task)
+    task.add_done_callback(TASKS[sid].discard)
+
+
+async def _run_job(job: dict):
     sid = job['session_id']
     async with LOCKS.setdefault(sid, asyncio.Lock()):
         await broadcast(sid, {'type': 'busy', 'active': True})
@@ -343,12 +479,19 @@ async def run_job(job: dict):
                     await broadcast(sid, progress)
                 result = assessment_output['result']
                 if studying and result['correct'] and (result.get('method') == 'llm' or result['verified']):
-                    following = await advance_study(sid)
+                    try:
+                        following = await advance_study(sid)
+                    except Exception as exc:
+                        logs.event('question.failed', error=type(exc).__name__)
+                        following = None
                     if following:
                         await broadcast(sid, following)
                     else:
-                        await broadcast(sid, {'type': 'error', 'message':
-                            'Your work changed while preparing the next question. Submit your answer again when ready.'})
+                        with SessionLocal.begin() as db:
+                            memory.update_short_term_memory(db, sid, {'question_generation_error':
+                                'Next question unavailable. Your assessment is saved; retry when ready.'})
+                            progress = study_snapshot(db, sid)
+                        await broadcast(sid, progress)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -380,9 +523,22 @@ async def run_job(job: dict):
         finally:
             with SessionLocal.begin() as db:
                 orchestrator.clear_pending_wake(db, sid)
+                if job['kind'] == 'problem_attempt' and require_session(db, sid).state.get('pending_assessment_event_id') == job['event_id']:
+                    memory.update_short_term_memory(db, sid, {'assessment_pending': False})
             with SessionLocal() as db:
                 await broadcast(sid, {'type': 'observer_status', **observer_status(require_session(db, sid).state)})
+                state = require_session(db, sid).state
+                if DRAFTS and job['kind'] == 'problem_attempt' and state.get('response_revision', 0) != job.get('response_revision'):
+                    DRAFTS.schedule(sid)
             await broadcast(sid, {'type': 'busy', 'active': False})
+
+
+async def run_job(job):
+    with logs.scope(job['session_id'], session_log_uuid(job['session_id']), trigger_event_id=job['event_id']):
+        started = time.perf_counter()
+        logs.event('job.start', kind=job['kind'])
+        await _run_job(job)
+        logs.event('job.finished', kind=job['kind'], duration_ms=round((time.perf_counter()-started)*1000,2))
 
 
 async def emit_activity(sid, items):
@@ -415,10 +571,17 @@ async def websocket(socket: WebSocket, session_id: int):
                 event = utils.ClientEvent.model_validate_json(raw)
                 if len(TASKS[session_id]) >= 4 and (event.type in ('student_message', 'problem_attempt', 'session_end', 'feedback') or event.action == 'hint_request'):
                     raise ValueError('Please wait for queued tutor requests to finish.')
-                with SessionLocal.begin() as db:
-                    job = orchestrator.ingest(db, session_id, event)
-                ack = {'type': 'ack', 'event_id': job['event_id'], 'event_type': job['kind'],
-                       'action': event.action, 'decision': job['decision'], 'revision': job['revision']}
+                with logs.scope(session_id, session_log_uuid(session_id)):
+                    logs.event('socket.event', kind=event.type, action=event.action)
+                    with SessionLocal.begin() as db:
+                        job = orchestrator.ingest(db, session_id, event)
+                    if DRAFTS and event.type in ('problem_attempt', 'session_end'):
+                        DRAFTS.cancel(session_id)
+                    elif DRAFTS and job.get('draft_changed') and event.action in ('edit', 'revert'):
+                        DRAFTS.schedule(session_id)
+                    logs.event('observer.decision', decision=job['decision'], event_id=job['event_id'])
+                ack = {'type': 'ack', 'event_id': job['event_id'], 'event_type': job['kind'], 'action': event.action, 'decision': job['decision'], 'revision': job['revision']}
+                ack['response_revision'] = job['response_revision']
                 if event.type == 'student_message':
                     ack['content'] = event.content
                 await socket.send_json(ack)
@@ -426,8 +589,7 @@ async def websocket(socket: WebSocket, session_id: int):
                     await broadcast(session_id, {'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
                 if job['explicit'] or job['decision'] == 'WAKE' or job['kind'] in ('problem_attempt', 'session_end', 'feedback'):
                     task = asyncio.create_task(run_job(job))
-                    TASKS[session_id].add(task)
-                    task.add_done_callback(TASKS[session_id].discard)
+                    track_task(session_id, task)
             except (ValidationError, ValueError) as exc:
                 await socket.send_json({'type': 'error', 'message': str(exc)[:400]})
     except WebSocketDisconnect:

@@ -14,7 +14,13 @@ from conftest import receive_until
 def create(client):
     response = client.post('/api/sessions')
     assert response.status_code == 200
-    return response.json()['id']
+    sid=response.json()['id']
+    assert client.post(f'/api/sessions/{sid}/problem',json={'concept':'Binary Search'}).status_code==200
+    with main.SessionLocal.begin() as db:
+        state=memory.get_short_term_memory(db,sid)
+        state['current_problem']['id']='binary-search-first'
+        memory.update_short_term_memory(db,sid,state)
+    return sid
 
 
 def ingest(factory, sid, **data):
@@ -25,7 +31,7 @@ def ingest(factory, sid, **data):
 def stalled(factory, sid):
     with factory.begin() as connection:
         state = memory.get_short_term_memory(connection, sid)
-        state['observer'].update(failure_streak=3, last_progress_at=utils.now()-100,
+        state['observer'].update(last_decision_at=0, failure_streak=3, last_progress_at=utils.now()-100,
                                  last_action_at=utils.now()-10, problem_started_at=utils.now()-150)
         memory.update_short_term_memory(connection, sid, state)
 
@@ -89,11 +95,15 @@ def test_explicit_websocket_ignores_proactive_preference(app_env):
 
 
 def test_wait_never_starts_agents(app_env, monkeypatch):
-    client, _, _ = app_env
+    client, factory, _ = app_env
     handle = AsyncMock()
     monkeypatch.setattr(orchestrator, 'handle', handle)
-    monkeypatch.setattr(utils, 'call_llm', AsyncMock(side_effect=AssertionError('Observer called an LLM')))
     sid = create(client)
+    with factory.begin() as connection:
+        state=memory.get_short_term_memory(connection,sid)
+        state['observer']['last_decision_at']=0
+        memory.update_short_term_memory(connection,sid,state)
+    monkeypatch.setattr(utils, 'call_llm', AsyncMock(side_effect=AssertionError('Observer called an LLM')))
     with client.websocket_connect(f'/ws/{sid}') as socket:
         socket.send_json({'type':'student_action','action':'idle'})
         assert receive_until(socket,'ack')['decision'] == 'WAIT'
@@ -269,7 +279,6 @@ async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypat
     """Exercise real call_llm plumbing and SDK-shaped parse/function outputs, no paid calls."""
     client,factory,_=app_env
     sid=create(client)
-    monkeypatch.setattr(config,'DEMO_MODE',False)
     monkeypatch.setattr(config,'LLM_PROVIDER','openai')
     usage=SimpleNamespace(input_tokens=80,output_tokens=20)
     async def parse(**kwargs):
@@ -286,6 +295,8 @@ async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypat
         return SimpleNamespace(output=[SimpleNamespace(type='function_call',name='hint',arguments=json.dumps({'content':'Consider the left boundary.','concept':'Binary Search'}))],usage=usage)
     fake=SimpleNamespace(responses=SimpleNamespace(parse=AsyncMock(side_effect=parse),create=AsyncMock(side_effect=create_response)))
     monkeypatch.setattr(utils,'get_client',lambda:fake)
+    from conftest import REAL_CALL_LLM as call_llm
+    monkeypatch.setattr(utils,'call_llm',call_llm)
     output=await orchestrator.handle(ingest(factory,sid,type='student_message',content='Can I have a clue?'))
     assert output[0]['result']['content']=='Consider the left boundary.'
     assert utils.METRICS['llm_calls']==3 and utils.METRICS['output_tokens']==60
@@ -304,8 +315,10 @@ async def test_observer_performance_and_metric_counts(app_env):
 async def test_repeated_correct_answer_cannot_inflate_mastery(app_env):
     client,factory,_=app_env
     sid=create(client)
-    for _ in range(3):
-        await orchestrator.handle(ingest(factory,sid,type='problem_attempt',content='1',problem_id='binary-search-first'))
+    await orchestrator.handle(ingest(factory,sid,type='problem_attempt',content='1',problem_id='binary-search-first'))
+    for _ in range(2):
+        with pytest.raises(ValueError, match='already being assessed or solved'):
+            ingest(factory,sid,type='problem_attempt',content='1',problem_id='binary-search-first')
     assert client.get('/api/student').json()['mastery']['Binary Search']==.6
 
 

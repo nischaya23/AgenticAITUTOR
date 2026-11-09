@@ -77,7 +77,7 @@ def test_general_scene_accepts_non_algorithm_topics_and_checks_motion_bounds():
 
 
 def test_binary_search_rejects_an_inconsistent_trace():
-    args = tutor.demo_arguments('visualization', {'concept': 'Binary Search'})
+    args = __import__('model_fixtures').tool_arguments('visualization', {'concept': 'Binary Search'})
     assert tools.interactive_visualization(args)['metadata']['visualization']['steps'][-1]['mid'] is None
     args['visualization']['steps'][1]['right'] = 3
     with pytest.raises(ValidationError, match='Search bounds'):

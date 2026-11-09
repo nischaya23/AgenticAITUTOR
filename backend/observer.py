@@ -49,12 +49,15 @@ def observe(state: dict, kind: str, data: dict, mastery: float, policy: dict,
     o.setdefault('last_action_at', t)
     # Unanswered interventions must not suppress help forever after a restart.
     for key in ('pending_intervention', 'pending_decision'):
-        if key in o and t-o[key]['at'] > 600:
-            o.pop(key)
+        if key in o and t-o[key]['at'] >= config.COOLDOWN_SECONDS:
+            pending = o.pop(key)
+            o['retired_outcome'] = {'intervention_id': pending.get('event_id'), 'action': pending.get('action'),
+                'reward': None, 'evidence': 'Cooldown elapsed without an outcome; retired for reevaluation.'}
     if data.get('action') == 'problem_opened':
         o.update(problem_started_at=t, last_progress_at=t, failure_streak=0,
                  revert_count=0, edit_times=[])
-    if kind == 'assessment' and data.get('verified'):
+    if kind == 'assessment' and (data.get('verified') or data.get('method') == 'llm'):
+        o['grading_signal'] = 'verified' if data.get('verified') else 'provisional LLM grading'
         if data['correct']:
             o.update(last_progress_at=t, failure_streak=0)
         else:
@@ -78,11 +81,12 @@ def observe(state: dict, kind: str, data: dict, mastery: float, policy: dict,
     action = 'WAIT'
     reason = 'Waiting for more evidence of difficulty'
     evaluated_scores = None
-    eligible = f['failure_streak'] >= config.FAILURE_THRESHOLD and f['time_since_progress'] >= config.STALL_SECONDS
-    if (state.get('ended') or not state.get('proactive_enabled', True)
+    idle = f['time_since_action'] >= config.IDLE_SECONDS
+    eligible = (f['failure_streak'] >= config.FAILURE_THRESHOLD and f['time_since_progress'] >= config.STALL_SECONDS) or idle
+    if (state.get('ended') or state.get('study_complete') or state.get('current_problem', {}).get('solved') or not state.get('proactive_enabled', True)
             or o.get('pending_wake') or o.get('pending_intervention')
             or f['time_since_intervention'] < config.COOLDOWN_SECONDS):
-        reason = 'Inactive' if state.get('ended') or not state.get('proactive_enabled', True) else 'Waiting for pending help or cooldown'
+        reason = 'Inactive or answered question' if state.get('ended') or state.get('study_complete') or state.get('current_problem', {}).get('solved') or not state.get('proactive_enabled', True) else 'Help is pending' if o.get('pending_wake') else 'Help cooldown'
         action = 'WAIT'
     elif t-o.get('last_edit_at', 0) < config.TYPING_GRACE_SECONDS:
         reason = 'You are still typing'
@@ -95,8 +99,9 @@ def observe(state: dict, kind: str, data: dict, mastery: float, policy: dict,
         if eligible:
             s = scores(policy, f)
             evaluated_scores = dict(zip(ACTIONS, s))
-            reason = 'Difficulty detected; evaluating whether to offer help'
             action = 'WAKE' if policy['updates'] < config.BANDIT_WARMUP or s[1] > s[0]+.05 else 'WAIT'
+            signal = 'Inactivity eligible' if idle else 'Difficulty eligible (' + o.get('grading_signal', 'assessment signals') + ')'
+            reason = signal + ('; policy WAIT' if action == 'WAIT' else '; evaluating whether to offer help')
         # Snapshot a WAIT only at an eligible decision, for comparable feedback.
         if eligible and action == 'WAIT' and not o.get('pending_decision'):
             o['pending_decision'] = {'action': 'WAIT', 'features': f, 'at': t}

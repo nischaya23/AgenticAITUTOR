@@ -7,17 +7,20 @@ ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4.1-mini')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-DEMO_MODE = os.getenv('DEMO_MODE', 'false').lower() == 'true'
 DATABASE_URL = os.getenv('DATABASE_URL', f'sqlite:///{ROOT / "tutor.db"}')
 DATA_DIR = Path(os.getenv('DATA_DIR', str(ROOT / 'data'))).resolve()
 API_TIMEOUT = float(os.getenv('API_TIMEOUT', '30'))
 MAX_OUTPUT_TOKENS = int(os.getenv('MAX_OUTPUT_TOKENS', '1600'))
 MAX_INPUT_CHARS = int(os.getenv('MAX_INPUT_CHARS', '60000'))
-FAILURE_THRESHOLD = int(os.getenv('FAILURE_THRESHOLD', '3'))
-STALL_SECONDS = float(os.getenv('STALL_SECONDS', '90'))
-COOLDOWN_SECONDS = float(os.getenv('COOLDOWN_SECONDS', '120'))
-AGGREGATION_SECONDS = float(os.getenv('AGGREGATION_SECONDS', '15'))
-TYPING_GRACE_SECONDS = float(os.getenv('TYPING_GRACE_SECONDS', '4'))
+FAILURE_THRESHOLD = int(os.getenv('FAILURE_THRESHOLD', '1'))
+STALL_SECONDS = float(os.getenv('STALL_SECONDS', '30'))
+IDLE_SECONDS = float(os.getenv('IDLE_SECONDS', '60'))
+COOLDOWN_SECONDS = float(os.getenv('COOLDOWN_SECONDS', '45'))
+AGGREGATION_SECONDS = float(os.getenv('AGGREGATION_SECONDS', '5'))
+TYPING_GRACE_SECONDS = float(os.getenv('TYPING_GRACE_SECONDS', '3'))
+PROVIDER_CONCURRENCY = max(1, int(os.getenv('PROVIDER_CONCURRENCY', '3')))
+HYPOTHESIS_PAUSE_SECONDS = 8
+HYPOTHESIS_INTERVAL_SECONDS = 30
 BANDIT_WARMUP = int(os.getenv('BANDIT_WARMUP', '12'))
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()

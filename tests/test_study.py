@@ -151,7 +151,6 @@ def test_review_without_issues_still_validates():
 
 async def test_live_grading_calls_llm_even_for_exact_answer(monkeypatch):
     from backend import assessment, config, utils
-    monkeypatch.setattr(config, 'DEMO_MODE', False)
     mock = AsyncMock(return_value=assessment.Assessment(correct=True,score=1,
         reason='Equivalent answer accepted.',misconceptions=[]))
     monkeypatch.setattr(utils, 'call_llm', mock)
@@ -234,3 +233,87 @@ async def test_llm_decision_controls_next_question(app_env, monkeypatch, correct
         assert (state['current_problem']['id']!=old)==correct
         if not correct:
             assert not state['current_problem'].get('solved')
+
+
+def test_student_plan_persists_across_skip_and_rejects_stale_edits(app_env,monkeypatch):
+    client,factory,_=app_env
+    sid,_,study=prepare(client)
+    version=study['state']['plan_version']
+    plan=dict(objective='  Learn carefully  ',steps=['Explain before solving'],learning_goals=['Understand boundaries'])
+    response=client.put(f'/api/sessions/{sid}/plan',json={'plan':plan,'expected_version':version})
+    assert response.status_code==200,response.text
+    saved=response.json()
+    assert saved['plan']['objective']=='Learn carefully'
+    assert saved['plan_version']==version+1
+    assert client.put(f'/api/sessions/{sid}/plan',json={'plan':plan,'expected_version':version}).status_code==409
+    plan['steps']=[' ']
+    assert client.put(f'/api/sessions/{sid}/plan',json={'plan':plan,'expected_version':version+1}).status_code==422
+    original=tools.generate_problem
+    calls=[]
+    async def capture(*args,**kwargs):
+        calls.append(kwargs)
+        return await original(*args,**kwargs)
+    monkeypatch.setattr(tools,'generate_problem',capture)
+    skipped=client.post(f'/api/sessions/{sid}/skip',json={'problem_id':study['state']['current_problem']['id']})
+    assert skipped.status_code==200
+    assert skipped.json()['state']['plan']==saved['plan']
+    assert calls[0]['plan']==saved['plan']
+    with factory() as db:
+        context=orchestrator.context_for(db,sid)
+        assert context['plan']==saved['plan']
+        assert context['plan_version']==saved['plan_version']
+    client.post(f'/api/sessions/{sid}/study',json={'material_id':study['material']['id']})
+    assert client.get(f'/api/sessions/{sid}/study').json()['state']['plan']==saved['plan']
+
+
+@pytest.mark.parametrize('action',['accept','dismiss'])
+def test_plan_suggestions_are_explicit_and_versioned(app_env,action):
+    from backend import plans
+    client,factory,_=app_env
+    sid,_,study=prepare(client)
+    old=study['state']['plan']
+    proposed=dict(objective='Different approach',steps=['Draw it first'],learning_goals=[])
+    with factory.begin() as db:
+        state=memory.get_short_term_memory(db,sid)
+        suggestion=plans.suggest(proposed,state,'Try a diagram.')
+        memory.update_short_term_memory(db,sid,{'plan_suggestion':suggestion})
+    assert client.get(f'/api/sessions/{sid}/study').json()['state']['plan']==old
+    body=dict(action=action,suggestion_id=suggestion['id'],expected_version=study['state']['plan_version'])
+    response=client.post(f'/api/sessions/{sid}/plan/suggestion',json=body)
+    assert response.status_code==200,response.text
+    assert response.json()['plan']==(proposed if action=='accept' else old)
+    assert response.json()['plan_suggestion'] is None
+    assert client.post(f'/api/sessions/{sid}/plan/suggestion',json=body).status_code==409
+
+
+async def test_replanner_suggests_without_overwriting_student_plan(app_env,monkeypatch):
+    from backend import planner,utils
+    client,factory,_=app_env
+    sid,_,study=prepare(client)
+    proposed=dict(objective='Try pictures',steps=['Draw the interval'],learning_goals=[])
+    monkeypatch.setattr(planner,'revise_plan',AsyncMock(return_value=proposed))
+    with factory.begin() as db:
+        job=orchestrator.ingest(db,sid,utils.ClientEvent(type='student_action',action='idle'))
+    job.update(replan=True,decision='WAIT')
+    outputs=await orchestrator.handle(job)
+    change=next(o for o in outputs if o['type']=='plan')
+    assert change['plan']==study['state']['plan']
+    assert change['plan_suggestion']['plan']==proposed
+    assert change['plan_version']==study['state']['plan_version']
+
+
+def test_legacy_material_session_initializes_plan_once(app_env,monkeypatch):
+    from backend import planner
+    client,factory,_=app_env
+    sid,material,study=prepare(client)
+    with factory.begin() as db:
+        memory.update_short_term_memory(db,sid,{'plan':{},'plan_version':0})
+    original=planner.create_learning_plan
+    mock=AsyncMock(side_effect=original)
+    monkeypatch.setattr(planner,'create_learning_plan',mock)
+    for _ in range(2):
+        response=client.post(f'/api/sessions/{sid}/study',json={'material_id':material['id']})
+        assert response.status_code==200,response.text
+        assert response.json()['state']['plan']['steps']
+        assert response.json()['state']['current_problem']['id']==study['state']['current_problem']['id']
+    assert mock.await_count==1

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MotionConfig } from 'motion/react';
+import LearningPlanPanel from './LearningPlan';
+import DiagramView, { emptyDiagram } from './Diagram';
+import Hypotheses from './Hypotheses';
 import Workspace, { annotationRange } from './Workspace';
 import VisualPlayer, { FlowGraph } from './Visualization';
-import type { Annotation, Assessment, HistoryItem, Observer, Result, Study, Tool } from './types';
+import type { Annotation, Assessment, Diagram, DiagramAnnotation, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool } from './types';
 import '../styles.css';
 
 const storageKey = 'studyroom-auto-session';
@@ -21,10 +24,13 @@ function post<T>(path: string, data: object) {
   return api<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 }
 
-type Message = Study | {
+type Message = Study | PlanState | {
+  plan?: PlanState['plan']; plan_version?: number; plan_suggestion?: PlanState['plan_suggestion'];
   type: 'intervention'; event_id: number; proactive: boolean; result: Result; revision: number;
-} | { type: 'assessment'; result: Assessment }
-  | { type: 'ack'; event_id: number; event_type: string; action: string; revision: number; content?: string }
+} | { type: 'assessment'; result: Assessment; stages?: { reflection: string; hypotheses: string } }
+  | { type: 'hypotheses'; state: HypothesisState }
+  | { type: 'memory_activity'; items: { message: string }[] }
+  | { type: 'ack'; event_id: number; event_type: string; action: string; revision: number; response_revision?: number; content?: string }
   | ({ type: 'observer_status' } & Observer)
   | { type: 'busy'; active: boolean }
   | { type: 'session_summary'; result: { summary: string; next_goal: string } }
@@ -50,17 +56,21 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [answer, setAnswer] = useState('');
+  const [diagramValue, setDiagramValue] = useState<Diagram>(emptyDiagram);
+  const [diagramAnnotations, setDiagramAnnotations] = useState<DiagramAnnotation[]>([]);
   const [chat, setChat] = useState('');
   const [assessment, setAssessment] = useState('');
+  const [memoryActivity, setMemoryActivity] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [summary, setSummary] = useState('');
   const ws = useRef<WebSocket | null>(null);
   const current = useRef<Study | null>(null);
   const workspace = useRef('');
+  const diagram = useRef<Diagram>(emptyDiagram());
   const sent = useRef('');
   const revision = useRef(0);
+  const responseRevision = useRef(0);
   const pendingEdits = useRef(0);
   const editTimer = useRef<number | undefined>(undefined);
 
@@ -73,38 +83,101 @@ function App() {
     return true;
   }
 
+  function responseValue(): StudentResponse {
+    return { text: workspace.current, diagram: diagram.current };
+  }
+
+  function markDraft(status: 'stale' | 'analyzing' = 'stale') {
+    if (!current.current) return;
+    const panel: HypothesisState = { ...current.current.state.hypothesis_state,
+      items: current.current.state.hypothesis_state?.items ?? [], status };
+    const next = { ...current.current, state: { ...current.current.state, hypothesis_state: panel } };
+    current.current = next; setStudy(next);
+  }
+
+  function saveDraft() {
+    try { localStorage.setItem('studyroom-draft-' + sid, JSON.stringify({ questionId: current.current?.state.current_problem.id, response: responseValue() })); }
+    catch { /* The server still saves drafts if browser storage is unavailable. */ }
+    markDraft();
+    window.clearTimeout(editTimer.current);
+    editTimer.current = window.setTimeout(flushEdits, 1000);
+  }
+
   function flushEdits() {
     window.clearTimeout(editTimer.current);
-    if (workspace.current === sent.current) return true;
-    if (!send({ type: 'student_action', action: 'edit', content: workspace.current })) return false;
+    const response = responseValue();
+    if (JSON.stringify(response) === sent.current) return true;
+    if (!send({ type: 'student_action', action: 'edit', response, content: response.text })) return false;
     pendingEdits.current++;
-    sent.current = workspace.current;
+    sent.current = JSON.stringify(response);
     return true;
   }
 
-  function applyStudy(view: Study) {
+  function applyStudy(view: Study, sessionId = sid) {
+    const previous = current.current;
+    const serverResponse = view.state.response ?? { text: view.state.workspace,
+      diagram: view.state.current_problem.starter_diagram ?? emptyDiagram() };
+    if(previous?.material.id === view.material.id && (previous.state.plan_version ?? 0) > (view.state.plan_version ?? 0)){
+      view = { ...view, state: { ...view.state, plan: previous.state.plan, plan_version: previous.state.plan_version, plan_suggestion: previous.state.plan_suggestion } };
+    }
     const changed = current.current?.state.current_problem.id !== view.state.current_problem.id
       || current.current?.material.id !== view.material.id;
     current.current = view;
     if (changed) {
       window.clearTimeout(editTimer.current);
-      sent.current = view.state.workspace;
-      workspace.current = sent.current.replace(/\r\n?/g, '\n');
-      setAnswer('');
+      const saved = serverResponse;
+      sent.current = JSON.stringify(saved);
+      let restored = saved;
+      try {
+        const local = JSON.parse(localStorage.getItem('studyroom-draft-' + sessionId) ?? 'null');
+        if (local?.questionId === view.state.current_problem.id && typeof local.response?.text === 'string'
+          && Array.isArray(local.response?.diagram?.nodes) && Array.isArray(local.response?.diagram?.edges)) restored = local.response;
+      } catch { /* A malformed local draft cannot replace the server copy. */ }
+      workspace.current = restored.text.replace(/\r\n?/g, '\n');
+      diagram.current = restored.diagram;
+      setDiagramValue(restored.diagram);
+      view = { ...view, state: { ...view.state, response: restored, workspace: restored.text } };
+      setDiagramAnnotations([]);
       setAnnotations([]);
     }
+    if (JSON.stringify(responseValue()) !== JSON.stringify(serverResponse) && view.state.hypothesis_state) {
+      view = { ...view, state: { ...view.state, hypothesis_state: { ...view.state.hypothesis_state, status: 'stale' } } };
+    }
+    current.current = view;
     setStudy(view);
+    if (view.state.last_assessment) setAssessment((view.state.last_assessment.correct ? 'Correct. ' : 'Not correct yet. ') + view.state.last_assessment.reason);
     revision.current = Math.max(revision.current, view.state.observer_status.revision ?? 0);
+    responseRevision.current = Math.max(responseRevision.current, view.state.response_revision ?? 0);
     setObserver(view.state.observer_status);
-    setPending(Boolean(view.state.current_problem.solved && !view.state.study_complete));
+    setPending(Boolean(view.state.current_problem.solved && !view.state.study_complete && !view.state.question_generation_error));
   }
 
   function appendHistory(item: HistoryItem) {
     setHistory(items => items.some(entry => entry.id === item.id) ? items : [...items, item]);
   }
 
+  function applyPlan(value: PlanState) {
+    const active = current.current;
+    if (!active || value.plan_version < (active.state.plan_version ?? 0)) return;
+    const next = { ...active, state: { ...active.state, plan: value.plan, plan_version: value.plan_version, plan_suggestion: value.plan_suggestion,
+      hypothesis_state: active.state.hypothesis_state && value.plan_version !== active.state.plan_version
+        ? { ...active.state.hypothesis_state, status: 'stale' as const } : active.state.hypothesis_state } };
+    current.current = next; setStudy(next);
+  }
+
   function onMessage(message: Message) {
     switch (message.type) {
+      case 'memory_activity': setMemoryActivity(message.items.map(item => item.message).join(' ')); break;
+      case 'plan': applyPlan(message); break;
+      case 'hypotheses':
+        if (current.current && message.state.question_id === current.current.state.current_problem.id
+          && message.state.plan_version === (current.current.state.plan_version ?? 0)) {
+          const panel = JSON.stringify(responseValue()) !== sent.current || pendingEdits.current > 0 || (message.state.response_revision ?? 0) < responseRevision.current
+            ? { ...message.state, status: 'stale' as const } : message.state;
+          const next = { ...current.current, state: { ...current.current.state, hypothesis_state: panel } };
+          current.current = next; setStudy(next);
+        }
+        break;
       case 'study_state': applyStudy(message); break;
       case 'observer_status':
         revision.current = Math.max(revision.current, message.revision ?? 0);
@@ -112,18 +185,25 @@ function App() {
         break;
       case 'ack':
         revision.current = Math.max(revision.current, message.revision);
-        if (message.action === 'edit') pendingEdits.current = Math.max(0, pendingEdits.current - 1);
+        responseRevision.current = Math.max(responseRevision.current, message.response_revision ?? 0);
+        if (message.action === 'edit') {
+          pendingEdits.current = Math.max(0, pendingEdits.current - 1);
+          if (!pendingEdits.current && JSON.stringify(responseValue()) === sent.current) localStorage.removeItem('studyroom-draft-' + sid);
+        }
         if (message.event_type === 'student_message' && message.content) {
           appendHistory({ id: message.event_id, type: 'student_message', data: { content: message.content } });
         }
         break;
       case 'intervention': {
-        const stale = workspace.current !== sent.current || pendingEdits.current > 0 || message.revision < revision.current;
+        if(message.plan) applyPlan({ type: 'plan', plan: message.plan, plan_version: message.plan_version ?? 0, plan_suggestion: message.plan_suggestion });
+        const stale = JSON.stringify(responseValue()) !== sent.current || pendingEdits.current > 0 || message.revision < revision.current;
         if (message.proactive && stale) break;
         const { result } = message;
         if (result.type === 'highlight' && !stale) {
           const items = result.metadata.annotations ?? [];
           setAnnotations(items.every(item => annotationRange(workspace.current, item)) ? items : []);
+          setDiagramAnnotations((result.metadata.diagram_annotations ?? []).filter(item =>
+            diagram.current[item.target === 'node' ? 'nodes' : 'edges'].some(element => element.id === item.id)));
         }
         appendHistory({ id: message.event_id, type: 'intervention',
           data: { ...result, proactive: message.proactive } });
@@ -134,6 +214,10 @@ function App() {
         setAssessment((message.result.correct ? 'Correct. ' : 'Not correct yet. ') + message.result.reason
           + (advances ? ' Preparing your next question.' : ''));
         setPending(advances);
+        if (current.current) {
+          const next = { ...current.current, state: { ...current.current.state, assessment_stages: message.stages } };
+          current.current = next; setStudy(next);
+        }
         break;
       }
       case 'busy': setBusy(message.active); break;
@@ -159,7 +243,7 @@ function App() {
     const path = '/api/sessions/' + sid;
     async function restore() {
       const view = await api<Study>(path + '/study');
-      return view.state.current_problem.solved && !view.state.study_complete && !view.state.ended
+      return ((!view.state.plan?.steps?.length) || (view.state.current_problem.solved && !view.state.study_complete)) && !view.state.ended
         ? post<Study>(path + '/study', { material_id: view.state.material_id }) : view;
     }
     function connect() {
@@ -174,7 +258,7 @@ function App() {
           const view = await restore();
           if (stopped || ws.current !== socket || socket.readyState !== WebSocket.OPEN) return;
           applyStudy(view);
-          if (opened && view.state.workspace !== workspace.current) sent.current = view.state.workspace;
+          if (opened) sent.current = JSON.stringify(view.state.response ?? { text: view.state.workspace, diagram: emptyDiagram() });
           opened = true;
           flushEdits();
           setConnected(true);
@@ -200,9 +284,9 @@ function App() {
     });
     const idle = window.setInterval(() => {
       if (!document.hidden && current.current?.state.current_problem.id
-          && !current.current.state.study_complete && !current.current.state.ended
+          && !current.current.state.current_problem.solved && !current.current.state.study_complete && !current.current.state.ended
           && ws.current?.readyState === WebSocket.OPEN) send({ type: 'student_action', action: 'idle' });
-    }, 20000);
+    }, 10000);
     return () => {
       stopped = true;
       window.clearInterval(idle);
@@ -224,10 +308,10 @@ function App() {
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
       setHistory([]);
-      setChat(''); setSummary(''); setAssessment('');
+      setChat(''); setSummary(''); setAssessment(''); setMemoryActivity('');
       revision.current = 0;
       localStorage.setItem(storageKey, String(session.id));
-      applyStudy(next);
+      applyStudy(next, session.id);
       setSid(session.id);
     } catch (error) {
       setNotice((error as Error).message);
@@ -246,8 +330,11 @@ function App() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!answer.trim() || disabled || !flushEdits()) return;
-    if (send({ type: 'problem_attempt', content: answer, problem_id: problem?.id })) setPending(true);
+    const response = responseValue();
+    if ((!response.text.trim() && !response.diagram.nodes.length) || disabled || !flushEdits()) return;
+    if (send({ type: 'problem_attempt', response, problem_id: problem?.id })) {
+      setPending(true); markDraft('analyzing');
+    }
   }
 
   async function skip() {
@@ -269,7 +356,7 @@ function App() {
 
   return <MotionConfig reducedMotion="user">
     <header><strong>Studyroom</strong><span id="status" role="status">
-      {uploading ? 'Preparing your study material…' : study?.state.study_complete ? 'Learning target reached'
+      {uploading ? 'Preparing your learning plan and first question…' : study?.state.study_complete ? 'Learning target reached'
         : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
         : study?.material.name ?? 'Upload material to begin'}
     </span><label className="upload">Upload material<input id="upload" type="file" accept=".pdf,.txt,.md"
@@ -290,8 +377,14 @@ function App() {
           : problem?.prompt ?? 'Upload lecture notes to build a concept graph and get your first question.'}</p>
         <div id="observer-status" role="status">Observer: {observer.decision ?? 'Waiting'} · {observer.reason ?? 'Waiting for activity'}</div>
         <details><summary>Observer details</summary><pre>{JSON.stringify(observer, null, 2)}</pre></details>
-        <h3>Your reasoning</h3>
-        <Workspace key={problem?.id ?? 'empty'} initial={study?.state.workspace ?? ''} disabled={uploading || !problem?.id || inactive}
+        {sid && study && <LearningPlanPanel key={sid + ':' + study.material.id} sessionId={sid}
+          value={{ type: 'plan', plan: study.state.plan ?? {}, plan_version: study.state.plan_version ?? 0, plan_suggestion: study.state.plan_suggestion }}
+          disabled={!connected || uploading || study.state.ended} onChange={value => { if(current.current?.material.id === study.material.id) applyPlan(value); }} />}
+        {problem?.format && <p className="eyebrow">{label(problem.format)}</p>}
+        {problem?.diagram && <DiagramView value={problem.diagram} label="Question diagram" />}
+        <h3>Your response</h3>
+        <section className="response-workspace" aria-label="Your response">
+        <Workspace key={problem?.id ?? 'empty'} initial={workspace.current} disabled={uploading || !problem?.id || inactive}
           annotations={annotations} canAsk={!disabled && !busy}
           onAsk={item => ask('Please explain your annotation on line '
             + item.line + ' about “' + item.quote + '”: ' + item.reason)}
@@ -299,20 +392,46 @@ function App() {
           onEdit={text => {
             workspace.current = text;
             setAnnotations([]);
-            window.clearTimeout(editTimer.current);
-            editTimer.current = window.setTimeout(flushEdits, 1000);
+            saveDraft();
           }} />
+        <details open={Boolean(diagramValue.nodes.length || problem?.format === 'diagram_construction')}>
+          <summary>Optional node-and-arrow diagram</summary>
+          <DiagramView value={diagramValue} disabled={uploading || !problem?.id || inactive} annotations={diagramAnnotations}
+            onChange={value => {
+              const previous = diagram.current;
+              setDiagramAnnotations(items => items.filter(item => {
+                const before = previous[item.target === 'node' ? 'nodes' : 'edges'].find(element => element.id === item.id);
+                const after = value[item.target === 'node' ? 'nodes' : 'edges'].find(element => element.id === item.id);
+                if (!before || !after || JSON.stringify(before) !== JSON.stringify(after)) return false;
+                if (item.target === 'edge') {
+                  const edge = previous.edges.find(element => element.id === item.id)!;
+                  return [edge.source, edge.target].every(id => previous.nodes.find(node => node.id === id)?.label === value.nodes.find(node => node.id === id)?.label);
+                }
+                return true;
+              }));
+              diagram.current = value; setDiagramValue(value); saveDraft();
+            }} />
+        </details>
         <form onSubmit={submit} id="answer-form">
-          <label htmlFor="answer">Your final answer</label>
-          <div className="answer-row"><input id="answer" maxLength={20000} value={answer} onChange={event => setAnswer(event.target.value)} disabled={disabled} />
-            <button id="submit" disabled={disabled}>Submit answer</button></div>
+          <button id="submit" disabled={disabled || Boolean(problem?.solved)}>Submit response</button>
         </form>
+        </section>
+        <Hypotheses state={study?.state.hypothesis_state} />
+        {study?.state.assessment_stages?.reflection === 'unavailable' && <p role="status">Reflection unavailable. Your assessment is saved.</p>}
+        {study?.state.assessment_stages?.hypotheses === 'unavailable' && <p role="status">Submission hypothesis analysis unavailable. Using previous hypotheses.</p>}
+        {study?.state.question_generation_error && <div role="status"><p>{study.state.question_generation_error}</p>
+          <button type="button" disabled={busy || pending || !connected} onClick={async () => {
+            setPending(true);
+            try { applyStudy(await post<Study>('/api/sessions/' + sid + '/next', { problem_id: problem?.id })); }
+            catch (error) { setNotice((error as Error).message); } finally { setPending(false); }
+          }}>Retry next question</button></div>}
         <div id="manual-tools">{tools.map(tool => <button type="button" key={tool} data-tool={tool} disabled={disabled || busy}
           onClick={() => {
             if (flushEdits() && send({ type: 'student_action', action: 'hint_request', tool })) setBusy(true);
           }}>{label(tool)}</button>)}
           <button id="skip" type="button" disabled={disabled || busy} onClick={skip}>Skip question</button></div>
         <p id="assessment" aria-live="polite">{assessment}</p>
+        {memoryActivity && <details className="memory-notice"><summary>Learning update</summary><p>{memoryActivity}</p></details>}
         <section className="chat" aria-label="Tutor chat">
           <h2>Tutor chat</h2>
           <form onSubmit={event => { event.preventDefault(); ask(chat); }}>

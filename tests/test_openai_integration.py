@@ -23,7 +23,6 @@ async def test_live_responses_api(monkeypatch):
 async def test_live_teaching_function(monkeypatch, kind):
     assert config.OPENAI_API_KEY, 'Provide OPENAI_API_KEY to run the paid smoke test.'
     monkeypatch.setattr(config, 'LLM_PROVIDER', 'openai')
-    monkeypatch.setattr(config, 'DEMO_MODE', False)
     context = dict(concept='Binary Search', problem={'prompt': 'Find the first 2 in [1, 2, 2, 5].'},
                    workspace='If the midpoint equals 2, set left = mid + 1.',
                    knowledge=[], query='Review the update and illustrate the lower-bound binary search.')

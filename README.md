@@ -5,7 +5,7 @@ six SQLite tables, OpenAI Responses API, and a conservative online LinUCB
 intervention policy. Python agent modules are small cooperating functions;
 there is no external agent framework.
 
-## Run the offline demo
+## Run the tutor
 
 Use Python 3.11 or newer and Node.js 20.19+ or 22.12+. From this directory:
 
@@ -16,7 +16,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Set `DEMO_MODE=true` in `.env`, then run:
+Configure a live provider in `.env` as described below, then run:
 
 ```bash
 npm ci
@@ -30,15 +30,7 @@ FastAPI serves the production build from `frontend/dist`. For development,
 keep FastAPI running on port 8000 and run `npm run dev` in a second terminal.
 Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/ws` to FastAPI.
 
-To try the enhanced tools offline, upload Markdown with the heading
-`# Binary Search`. Enter a reasoning step and request **highlight** to see
-a scripted annotation. Request **visualization** to play the binary search trace.
-
-The offline demo has scripted Binary Search teaching, a practice problem,
-exact-answer grading, all five tool renderers, material ingestion/retrieval,
-memory, reflection, and the online policy. Scripted teaching is visibly
-labeled. Offline concept extraction uses Markdown headings and creates no
-inferred prerequisite edges. It does not simulate arbitrary subject tutoring.
+Upload learning material to generate a concept graph and begin. New sessions start without a preloaded question. All teaching, grading, extraction, and reflection use the configured provider.
 
 ## Enable OpenAI
 
@@ -49,15 +41,13 @@ OPENAI_API_KEY=your_key_here
 LLM_PROVIDER=openai
 OPENAI_MODEL=gpt-4.1-mini
 DATABASE_URL=sqlite:///./tutor.db
-DEMO_MODE=false
 ```
 
 Choose a model available to your API account that supports Responses,
 structured outputs, and function calling. Restart the server after changing
 environment settings. A missing key produces a clear error when teaching is
 requested; the application and its saved data remain accessible. The API key
-is never returned to the browser. API errors do not silently switch to demo
-answers.
+is never returned to the browser. API errors are reported; there is no scripted fallback.
 
 `utils.call_llm` uses a lazily created `AsyncOpenAI` client, Responses
 `create`/`parse`, Pydantic schemas, two SDK retries, an overall timeout,
@@ -78,7 +68,7 @@ agentic-tutor/
 │   ├── observer.py         # Temporal features, guards, LinUCB
 │   ├── planner.py          # Current plan, longer-term goals, action selection
 │   ├── tutor.py            # Grounded teaching and function calls
-│   ├── assessment.py       # Exact checks or provisional reasoning review
+│   ├── assessment.py       # Provisional combined-response assessment
 │   ├── reflection.py       # Evidence, rewards, session summaries
 │   ├── memory.py           # Compact memory operations
 │   ├── student_model.py    # Mastery and misconception hypotheses
@@ -151,7 +141,7 @@ is queried with a bounded window instead of copied into memory JSON.
    development user owns local sessions. Course material is shared across this
    local user's sessions.
 2. Workspace edits are debounced for one second; visible-tab inactivity events
-   arrive every 20 seconds. Attempts and explicit questions are sent immediately.
+   arrive every ten seconds for visible, unanswered questions. Attempts and explicit questions are sent immediately.
    Chat remains editable while model work runs in a background asyncio task.
 3. The Observer updates temporal features without an LLM. It defers during
    typing, applies user preferences/cooldowns, and aggregates decisions over
@@ -164,10 +154,10 @@ is queried with a bounded window instead of copied into memory JSON.
    session and checks its revision, current problem, preferences, and end state.
    Duplicate trigger IDs are rejected. Client-side unsent edits also suppress
    proactive cards. Highlight ranges must match the delivery-time source.
-6. Offline grading uses the server-side reference. Live grading uses the rubric,
+6. Grading uses the rubric,
    student reasoning, and retrieved context. A correct live assessment can
-   advance the session. Only verified outcomes affect the Observer's failure
-   streak and outcome-based policy rewards. Repeating a solved problem does
+   advance the session. Accepted LLM assessments count as provisional progress
+   or failure for the Observer; they never become verified policy rewards. Repeating a solved problem does
    not inflate mastery.
 7. A usable later outcome or linked feedback triggers deterministic Reflection.
    The session model, compact memory, and policy update in one transaction.
@@ -197,27 +187,30 @@ them with the same playback controls as other step-based views. The visual
 language is limited to these primitives, while subjects and processes can vary
 with the study material. The browser loads Konva when a scene is first shown.
 
-The Binary Search demo uses Motion for React to animate the half-open interval
+The Binary Search renderer uses Motion for React to animate the half-open interval
 and its pointers. React Flow renders concept graphs, trees, and graph traversals
 with pan, zoom, and draggable nodes. Step-based visuals provide previous, next,
 restart, play/pause, and speed controls. Model outputs contain structured data
 and text. All rendering logic lives in the application.
 
-The four internal functions are `retrieve_knowledge`, `get_prerequisites`,
-`verify_solution`, and `generate_problem`. No-intervention is a planner/policy
+The internal helpers include `retrieve_knowledge`, `get_prerequisites`,
+and `generate_problem`. No-intervention is a planner/policy
 decision, not a sixth student-facing tool.
 
 ## Observer and online learning
 
-Features: time since verified progress, time since activity, failure streak,
+Features: time since progress (including provisional accepted LLM grading), time since activity, failure streak,
 edit frequency, reverts, time on problem, recent hints, concept mastery, and
 time since intervention. These are normalized and clipped, with an intercept.
 
-Cold start uses `failure_streak >= 3` and `time_since_progress >= 90` seconds.
+Cold start uses one incorrect assessment and 30 seconds without progress, or
+60 seconds of inactivity.
 Before 12 usable feedback updates, the rule baseline is used. Afterwards,
 LinUCB compares WAIT and WAKE scores with a conservative WAKE margin. The
 same struggle thresholds, typing guard, user preference, pending-output guard,
-and 120-second cooldown continue to apply. This deliberately limits exploration.
+and 45-second cooldown continue to apply. The typing grace is three seconds
+and aggregation interval is five seconds. The numerical policy can choose WAIT;
+the planner can also decline help.
 
 The default learning signal is +0.5 for an exact correct outcome, -0.25 for
 an exact incorrect outcome, or the student's linked +1/-1 feedback. An eligible
@@ -225,7 +218,8 @@ WAIT decision can receive the same later exact-outcome proxy; easy/background
 WAIT events do not train the policy. Each pending decision is consumed once.
 No reward is assigned to provisional LLM review, expired windows, or attempts
 submitted before the intervention. A new explicit help request censors the
-old window. Unanswered decisions expire after ten minutes. Interrupted pending
+old window. Unanswered outcome windows retire after the cooldown, recording no
+reward, so the Observer can reevaluate help. Interrupted pending
 wakes are cleared at application startup.
 
 These rewards are noisy observational associations, not causal estimates.
@@ -241,7 +235,7 @@ overlapping chunks are stored under `data/materials/` using generated IDs;
 user filenames are display labels, never filesystem paths. Retrieval uses
 BM25 over disk chunks. Live concept extraction produces a bounded graph;
 unknown/self edges and directed cycles are rejected. Seed material and
-reviewable prerequisites are provided for Binary Search.
+prerequisites are extracted from uploaded material.
 
 ## Tests
 
@@ -304,9 +298,7 @@ Interactive HTTP schemas are available at `/docs`.
   conceptual mastery. Generated reference answers can be wrong; review them for
   high-stakes use. LLM reasoning judgments and misconception hypotheses remain
   provisional. Mastery values are heuristic scores, not calibrated probabilities.
-- The offline demo's teaching examples cover Binary Search only. Arbitrary
-  concept tutoring, diagnostic review, graph extraction, problem generation,
-  and session synthesis require a working API key in live mode.
+
 - Scanned PDFs need OCR before upload; PPTX ingestion is not implemented.
   Disk BM25 is intended for a small course library, not a large corpus. Uploaded
   graph extraction uses the first 24,000 characters; extracted edges need review.
@@ -321,3 +313,86 @@ Interactive HTTP schemas are available at `/docs`.
 
 - [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+
+## Maintaining prompts and logs
+
+Edit `backend/prompts.py` to review all model-facing instructions, tool descriptions,
+and retry directives. Restart the backend after edits. Dynamic student inputs remain
+in the calling modules. Provider adapters and the shared `call_llm` entrypoint live in `backend/utils.py`.
+
+Logs are JSON lines at INFO level under `tmp/logs/<session-uuid>.log`.
+Startup and requests without a session use `startup-<run-uuid>.log`.
+Each entry includes a UTC timestamp, session ID/UUID, operation UUID, and module.
+Background jobs include the triggering event ID. Session UUIDs persist in existing
+session JSON and are omitted from API responses. No database migration is needed.
+
+LLM request/response entries include full prompts, reasoning, retrieved context,
+model output, tools, token usage, and durations. These files contain private learning
+content; credentials and authorization headers are not logged. `tmp/` is ignored by
+Git. Logs persist until manually removed; handlers are closed on shutdown.
+
+Ordinary tests mock model calls and require no API key or paid requests.
+Optional browser tests use a test-only mocked provider server. Live provider smoke
+tests remain opt-in with `RUN_OPENAI_INTEGRATION=1`.
+
+## Student-editable learning plan
+
+The Learning plan panel shows the material-wide objective, steps, and goals.
+Use Edit plan, then Save plan to share changes with future tutoring, grading,
+reflection, and question-generation calls. Drafts remain local until saved.
+Plans persist across correct answers and Skip. AI revisions are suggestions:
+Accept suggestion applies one; Dismiss keeps the active plan.
+
+Plan edits are versioned. A stale save returns a conflict and preserves the draft;
+review the latest saved plan before retrying. Running jobs finish with their captured
+plan before a save completes. Plan preferences cannot override grading rubrics.
+Reflection still runs after each successfully graded submission; reflection errors
+do not block grading. New plan JSON fields require no database migration.
+
+
+## Unified responses and possible knowledge gaps
+
+The **Your response** workspace submits text and an optional editable React Flow
+node-and-arrow diagram together. Nodes can be renamed, moved, connected, or
+deleted using the canvas or labeled keyboard controls. Diagrams are limited to
+30 nodes and 60 directed edges; IDs, endpoints, finite positions, and labels
+(up to 200 characters) are validated on both incoming responses and model output.
+Question diagrams are separate read-only views. Highlight only reviews the
+response workspace: exact text excerpts or valid response node/edge IDs. Diagram
+issues use red outlines and explanations; affected annotations clear on edits.
+
+Text and diagrams save atomically to session JSON. Browser drafts cover reloads
+before the one-second server-save debounce or while disconnected. Each submission
+captures its own immutable response snapshot for grading and reflection. Legacy
+`workspace` strings remain readable, and text-only socket submissions remain
+supported. Incorrect answers retain the current question and response. Correct
+answers progress after reflection and hypothesis analysis; a next-question
+failure keeps feedback and offers **Retry next question** without reassessment.
+
+The **Possible knowledge gaps** panel shows uncertain hypotheses with confidence,
+evidence references, and draft/submission origin. Meaningful content changes
+trigger analysis after an eight-second pause, at most once per 30 seconds per
+session. Moving a node alone does not trigger analysis. A worker coalesces edits,
+checks question/plan/response versions after model calls, and discards stale
+results. Submission cancels draft work and takes priority. Draft analysis runs
+outside the teaching lock and never updates mastery, policy rewards, or durable
+learning memory. Completed submission analysis follows reflection and persists
+at most eight current evidence-linked hypotheses in the existing JSON storage.
+Background updates affect only the panel; grading uses the compact notification.
+
+Question generation receives the active student-edited plan, eligible concepts,
+latest valid hypotheses, prior questions, sources, and recent formats. It chooses
+explanation, trace, diagram interpretation, or diagram construction while respecting
+prerequisites. Private reference answers and rubrics remain server-side. Reflection
+or hypothesis failures are shown independently and preserve the assessment; question
+generation may use the last valid hypotheses. Response text, labels, edited plans,
+and hypotheses are untrusted data, never model instructions or grading authority.
+
+Observer environment overrides: `FAILURE_THRESHOLD=1`, `STALL_SECONDS=30`,
+`IDLE_SECONDS=60`, `COOLDOWN_SECONDS=45`, `TYPING_GRACE_SECONDS=3`, and
+`AGGREGATION_SECONDS=5`. `PROVIDER_CONCURRENCY=3` caps combined provider calls,
+including draft hypotheses and foreground grading/tools. Existing `.env` values
+**take precedence over these defaults**; exported process variables take precedence
+over `.env`. Update existing overrides to opt into the new timings. Draft pause
+and rate-limit defaults are eight and 30 seconds. No database migration or image
+input is required.

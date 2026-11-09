@@ -23,6 +23,10 @@ def get_short_term_memory(db, session_id: int) -> dict:
 def update_short_term_memory(db, session_id: int, updates: dict) -> dict:
     state = get_short_term_memory(db, session_id)
     state.update(deepcopy(updates))
+    if 'workspace' in updates and 'response' not in updates:
+        from .response import response_for
+        response = response_for(state)
+        state['response'] = {**response, 'text': updates['workspace']}
     state = SessionData.model_validate(state).model_dump(mode='json')
     db.get(Session, session_id).state = state
     record('memory_update', 'Updated session memory: ' + ', '.join(sorted(updates)) + '.')
