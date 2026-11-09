@@ -26,6 +26,10 @@ def app_env(tmp_path, monkeypatch):
         correct=(answer['text'] if isinstance(answer,dict) else answer).strip()==problem.get('expected_answer')
         return dict(correct=correct,score=float(correct),verified=True,reason='Test reference.',misconceptions=[])
     monkeypatch.setattr(assessment, 'evaluate_attempt', mock_assess)
+    from backend import websearch
+    async def offline_search(query, max_pages=None):
+        raise websearch.WebSearchError('Web search is disabled in tests.')
+    monkeypatch.setattr(websearch, 'search', offline_search)
     utils.METRICS.clear()
     with TestClient(main.app) as client:
         response = client.post('/api/auth/signup', json={'email': 'student@local.test', 'password': 'test-password'})

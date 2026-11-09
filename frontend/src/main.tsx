@@ -7,7 +7,7 @@ import DiagramView, { emptyDiagram } from './Diagram';
 import Hypotheses from './Hypotheses';
 import Workspace, { annotationRange } from './Workspace';
 import VisualPlayer, { FlowGraph } from './Visualization';
-import type { Annotation, Assessment, Diagram, DiagramAnnotation, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool } from './types';
+import type { Annotation, Assessment, Diagram, DiagramAnnotation, HypothesisState, Response as StudentResponse, HistoryItem, Meaning, Observer, PlanState, Result, Study, Tool } from './types';
 import '../styles.css';
 
 const tools: Tool[] = ['hint', 'explanation', 'highlight', 'visualization', 'guiding_question'];
@@ -59,6 +59,10 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState(false);
   const [topic, setTopic] = useState('');
+  const [choices, setChoices] = useState<{ topic: string; meanings: Meaning[] } | null>(null);
+  const [enhanceUploads, setEnhanceUploads] = useState(() => {
+    try { return localStorage.getItem('studyroom-web-enhance') === 'true'; } catch { return false; }
+  });
   const [progressMessage, setProgressMessage] = useState('');
   const [connected, setConnected] = useState(false);
   const [pending, setPending] = useState(false);
@@ -317,6 +321,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   function upload(files: File[]) {
     const form = new FormData();
     for (const file of files) form.append('files', file);
+    form.append('web_enhance', String(enhanceUploads));
     void begin('Building one learning graph from your materials…',
       () => api<{ id: string }>('/api/materials', { method: 'POST', body: form }));
   }
@@ -324,12 +329,21 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   function studyTopic(event: FormEvent) {
     event.preventDefault();
     const value = topic.trim();
-    if (value.length < 2) return;
-    void begin('Searching the web for “' + value + '” and building your learning graph…',
-      () => post<{ id: string }>('/api/materials/web', { topic: value }));
+    if (value.length >= 2) searchTopic(value);
   }
 
-  async function begin(message: string, makeMaterial: () => Promise<{ id: string }>) {
+  // An ambiguous topic comes back as meanings; the student picks one and the search runs for it.
+  function searchTopic(value: string, meaning?: Meaning) {
+    setChoices(null);
+    void begin('Searching the web for “' + (meaning?.label ?? value) + '” and building your learning graph…', async () => {
+      const result = await post<{ id: string } | { type: 'choices'; topic: string; meanings: Meaning[] }>(
+        '/api/materials/web', meaning ? { topic: value, meaning } : { topic: value });
+      if ('type' in result) { setChoices(result); return null; }
+      return result;
+    });
+  }
+
+  async function begin(message: string, makeMaterial: () => Promise<{ id: string } | null>) {
     setUploading(true);
     setProgressMessage(message);
     onUploadChange(true);
@@ -337,6 +351,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     setNotice('');
     try {
       const material = await makeMaterial();
+      if (!material) return;
       setTopic('');
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
@@ -383,9 +398,32 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     } finally { setPending(false); }
   }
 
+  async function chooseConcept(concept: string) {
+    if (!sid || !flushEdits()) return;
+    setPending(true);
+    try {
+      applyStudy(await post<Study>('/api/sessions/' + sid + '/concept', { concept }));
+      setAssessment('Switched to ' + concept + '. The tutor stays on it until you master it.');
+    } catch (error) {
+      setNotice((error as Error).message);
+    } finally { setPending(false); }
+  }
+
+  async function setWebEnhance(enabled: boolean) {
+    if (!study) return;
+    try {
+      const result = await post<{ web_enhance: boolean }>('/api/materials/' + study.material.id + '/web-enhance', { enabled });
+      if (current.current?.material.id === study.material.id)
+        applyStudy({ ...current.current, material: { ...current.current.material, web_enhance: result.web_enhance } });
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  }
+
   const problem = study?.state.current_problem;
   const inactive = Boolean(study?.state.ended || study?.state.study_complete);
   const disabled = uploading || !connected || !problem?.id || inactive || pending;
+  const choosing = uploading || !connected || pending || busy || Boolean(study?.state.ended || study?.state.assessment_pending);
   const activeNode = study?.graph.nodes.find(node => node.active);
   const mastery = activeNode?.mastery;
 
@@ -401,6 +439,11 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         event.target.value = '';
         if (files.length) upload(files);
       }} /></label>
+      <label className="web-enhance-option" title="Also search the web for every concept in uploaded files">
+        <input id="enhance-uploads" type="checkbox" checked={enhanceUploads} disabled={uploading} onChange={event => {
+          setEnhanceUploads(event.target.checked);
+          try { localStorage.setItem('studyroom-web-enhance', String(event.target.checked)); } catch { /* optional */ }
+        }} />+ web</label>
       <form className="web-topic" role="search" onSubmit={studyTopic}>
         <input id="web-topic" type="search" placeholder="Or study a topic from the web…" aria-label="Topic to study from the web"
           value={topic} maxLength={200} disabled={uploading} onChange={event => setTopic(event.target.value)} />
@@ -415,6 +458,12 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         }}>Log out</button></div>
     </header>
     {notice && <p id="notice" role="alert">{notice}</p>}
+    {choices && <div id="topic-choices" role="group" aria-label="Choose what you meant">
+      <p>“{choices.topic}” can mean different subjects. Which one do you want to study?</p>
+      {choices.meanings.map(meaning => <button key={meaning.label} type="button" disabled={uploading}
+        onClick={() => searchTopic(choices.topic, meaning)}><strong>{meaning.label}</strong><small>{meaning.description}</small></button>)}
+      <button type="button" className="secondary" onClick={() => setChoices(null)}>Cancel</button>
+    </div>}
     <main className={study ? 'study-layout' : 'new-chat'}>
       {!study ? <section className="new-chat-content">
         <p className="eyebrow">{sid ? 'STUDY CHAT' : 'NEW CHAT'}</p>
@@ -520,10 +569,25 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       </section>
       <aside className="panel graph-panel">
         <p className="eyebrow">YOUR LEARNING MAP</p><h2>Concept graph</h2>
-        <p className="muted">Arrows point from a prerequisite to the next concept.</p>
+        <p className="muted">Arrows point from a prerequisite to the next concept. Click any unlocked concept to study it next.</p>
         <div id="graph">{study ? <FlowGraph key={study.material.id} graph={study.graph}
-          masteryTarget={study.mastery_target} label="Concept graph and estimated mastery" />
+          masteryTarget={study.mastery_target} label="Concept graph and estimated mastery"
+          onSelect={choosing ? undefined : concept => void chooseConcept(concept)} />
           : <p className="muted">Your map will appear after processing.</p>}</div>
+        {study && <div className="concept-controls">
+          <label htmlFor="concept-picker">Study a concept</label>
+          <select id="concept-picker" value="" disabled={choosing} onChange={event => {
+            if (event.target.value) void chooseConcept(event.target.value);
+          }}>
+            <option value="">Choose an unlocked concept…</option>
+            {study.graph.nodes.filter(node => node.available && !node.active).map(node =>
+              <option key={node.id} value={node.id}>{node.label}</option>)}
+          </select>
+          <label className="web-enhance-option"><input id="web-enhance" type="checkbox"
+            checked={Boolean(study.material.web_enhance)} disabled={study.state.ended}
+            onChange={event => void setWebEnhance(event.target.checked)} />
+            Enhance with web search for every concept</label>
+        </div>}
         {study && <details><summary id="material-name">{study.material.name}</summary>
           {study.material.web_sources?.length ? <ul id="material-sources" className="muted">
             {study.material.web_sources.map(link => <li key={link.url}><a href={link.url} target="_blank"

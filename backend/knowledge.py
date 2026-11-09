@@ -82,15 +82,25 @@ def add_web_documents(material_id: str, documents: list[dict], concept: str) -> 
     for doc in documents:
         if doc['url'] in known:
             continue
-        added.extend(make_chunks(material_id, len(record['chunks']) + len(added), doc['title'], doc['text'][:12000], doc['url']))
+        chunks = make_chunks(material_id, len(record['chunks']) + len(added), doc['title'], doc['text'][:12000], doc['url'])
+        added.extend({**chunk, 'lookup': concept} for chunk in chunks)
         record.setdefault('web_sources', []).append(dict(title=doc['title'], url=doc['url'], concept=concept))
         known.add(doc['url'])
     record['chunks'].extend(added)
     record.setdefault('web_lookups', []).append(concept)
+    _write_record(path, record)
+    return added
+
+def update_material(material_id: str, **fields) -> dict:
+    path = config.DATA_DIR / 'materials' / f'{material_id}.json'
+    record = {**json.loads(path.read_text(encoding='utf-8')), **fields}
+    _write_record(path, record)
+    return record
+
+def _write_record(path: Path, record: dict):
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(record), encoding='utf-8')
     temporary.replace(path)
-    return added
 
 def list_materials(user_id: int | None = None) -> list[dict]:
     directory = config.DATA_DIR / 'materials'
@@ -137,9 +147,14 @@ def extraction_input(documents: list[tuple[str, str]]) -> str:
     sections = (f'### Document {i}: {name}\n{text[:share]}' for i, (name, text) in enumerate(documents, 1))
     return '\n\n'.join(sections)
 
-async def extract_concepts(documents: list[tuple[str, str]]) -> ConceptGraph:
+async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=None) -> ConceptGraph:
+    """`focus` names the study subject (web topics) so off-topic pages contribute no concepts."""
     instructions = prompts.EXTRACT_CONCEPTS if len(documents) == 1 else prompts.EXTRACT_CONCEPTS_MULTI
-    return await utils.call_llm(instructions, extraction_input(documents), schema=ConceptGraph, operation='EXTRACT_CONCEPTS')
+    text = extraction_input(documents)
+    if focus:
+        instructions += prompts.EXTRACT_FOCUS
+        text = f'Study subject: {focus}\n\n{text}'
+    return await utils.call_llm(instructions, text, schema=ConceptGraph, operation='EXTRACT_CONCEPTS')
 
 def store_graph(db, graph: ConceptGraph, isolated: bool = False):
     names = list(dict.fromkeys((n.strip()[:200] for n in graph.concepts if n.strip())))
