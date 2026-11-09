@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.cors import CORSMiddleware
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import delete, select
@@ -21,6 +22,7 @@ SOCKETS: dict[int, set] = defaultdict(set)
 TASKS: dict[int, set] = defaultdict(set)
 LOCKS: dict[int, asyncio.Lock] = {}
 LOG = logging.getLogger('tutor')
+ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 DRAFTS = None
 
 
@@ -131,7 +133,7 @@ async def request_logging(request, call_next):
     if request.url.path.startswith('/api/'):
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
             origin = request.headers.get('origin')
-            if origin and origin.removeprefix('http://').removeprefix('https://') != request.headers.get('host'):
+            if origin and origin not in ALLOWED_ORIGINS and origin.removeprefix('http://').removeprefix('https://') != request.headers.get('host'):
                 return JSONResponse({'detail': 'Cross-origin requests are not allowed.'}, status_code=403)
         public = {'/api/health', '/api/auth/login', '/api/auth/signup', '/api/auth/me'}
         if request.url.path not in public:
@@ -162,6 +164,15 @@ async def request_logging(request, call_next):
         except Exception as exc:
             logs.event('http.failed', error=type(exc).__name__)
             raise
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=['GET', 'POST', 'PUT'],
+    allow_headers=['Content-Type'],
+)
 
 
 @app.get('/')
@@ -196,11 +207,15 @@ def create_session(request: Request):
 
 @app.get('/api/sessions')
 def list_sessions(request: Request):
+    materials = {material['id']: material['name'] for material in knowledge.list_materials(request.state.user_id)}
     with SessionLocal() as db:
         rows = db.scalars(select(Session).where(Session.user_id == request.state.user_id)
-            .order_by(Session.id.desc()).limit(100)).all()
+            .order_by(Session.id.desc())).all()
         return {'sessions': [{'id': row.id, 'material_id': row.state.get('material_id'),
-                             'ended': row.state.get('ended', False)} for row in rows]}
+                             'title': materials.get(row.state.get('material_id')) or row.state.get('current_concept') or 'Study chat',
+                             'created_at': row.created_at.isoformat() + ('Z' if row.created_at.tzinfo is None else ''),
+                             'ended': row.state.get('ended', False),
+                             'complete': row.state.get('study_complete', False)} for row in rows]}
 
 
 @app.post('/api/auth/logout')
@@ -227,7 +242,7 @@ def read_session(session_id: int):
         row = require_session(db, session_id)
         history = db.scalars(select(Event).where(Event.session_id == session_id,
             Event.type.in_(['student_message', 'intervention', 'assessment', 'reflection']))
-            .order_by(Event.id.desc()).limit(60)).all()
+            .order_by(Event.id.desc())).all()
         return {'id': row.id, 'state': public_state(row.state),
                 'history': [{'id': e.id, 'type': e.type, 'data': e.data} for e in reversed(history)]}
 
@@ -700,9 +715,9 @@ async def emit_activity(sid, items):
 
 @app.websocket('/ws/{session_id}')
 async def websocket(socket: WebSocket, session_id: int):
-    # Local-only MVP: reject browser cross-origin socket attempts.
+    # Allow the Vite frontend and same-origin browser connections.
     origin = socket.headers.get('origin')
-    if origin and origin.removeprefix('http://').removeprefix('https://') != socket.headers.get('host'):
+    if origin and origin not in ALLOWED_ORIGINS and origin.removeprefix('http://').removeprefix('https://') != socket.headers.get('host'):
         await socket.close(code=1008)
         return
     with SessionLocal() as db:

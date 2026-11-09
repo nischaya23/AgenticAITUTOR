@@ -38,7 +38,9 @@ def test_login_logout_and_isolation(app_env):
             context = orchestrator.context_for(connection, own_sid, 'Private lesson')
             assert context['knowledge'] == []
         assert alice.get('/api/materials').json()[0]['id'] == material['id']
-        assert alice.get('/api/sessions').json()['sessions'][0]['id'] == sid
+        saved = alice.get('/api/sessions').json()['sessions'][0]
+        assert saved['id'] == sid
+        assert saved['created_at']
         assert outsider.post('/api/auth/logout').status_code == 200
         assert outsider.get('/api/auth/me').status_code == 401
         assert outsider.post('/api/auth/login', json={
@@ -90,3 +92,18 @@ def test_existing_database_migrates_without_claiming_anonymous_data(tmp_path, mo
         assert connection.exec_driver_sql('SELECT COUNT(*) FROM logins').scalar() == 0
         assert connection.exec_driver_sql('SELECT COUNT(*) FROM materials').scalar() == 0
     engine.dispose()
+
+
+def test_saved_chat_title_and_complete_conversation(app_env):
+    client, factory, _ = app_env
+    material = client.post('/api/materials', files={'file': (
+        'course.md', b'# Binary Search\nSearch a sorted interval.', 'text/markdown')}).json()
+    sid = client.post('/api/sessions').json()['id']
+    assert client.post(f'/api/sessions/{sid}/study', json={'material_id': material['id']}).status_code == 200
+    with factory.begin() as connection:
+        for index in range(65):
+            db.append_event(connection, sid, 'student_message', {'content': f'Message {index}'})
+    saved = client.get('/api/sessions').json()['sessions'][0]
+    assert saved['title'] == 'course.md'
+    history = client.get(f'/api/sessions/{sid}').json()['history']
+    assert len([item for item in history if item['type'] == 'student_message']) == 65

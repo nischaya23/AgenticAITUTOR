@@ -34,13 +34,15 @@ Upload learning material to generate a concept graph and begin. New sessions sta
 
 Create an account using **Sign up**, then use your email and password to log in.
 Each account has its own uploads, study sessions, drafts, and learning memory.
-The browser resumes the most recent study session for that account. Use **Log out**
+Each login opens a new chat; earlier study chats are available in the sidebar. Use **Log out**
 in the header to end the login.
 
 Passwords are hashed with scrypt and a unique random salt. Login tokens are stored
 as hashes in SQLite and sent in an HttpOnly, SameSite cookie that expires after
 seven days. Set `COOKIE_SECURE=true` when serving over HTTPS. The local HTTP
 setup uses `COOKIE_SECURE=false`.
+
+Vite login/signup allows `http://localhost:5173` and `http://127.0.0.1:5173`; restart FastAPI after changing allowed origins in `backend/main.py`.
 
 On startup, the app automatically adds the password column and the login and
 material ownership tables to existing databases. Existing anonymous sessions and

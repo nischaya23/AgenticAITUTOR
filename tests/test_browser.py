@@ -44,11 +44,11 @@ def test_all_interventions_materials_and_mobile(tmp_path):
             page.get_by_label('Email', exact=True).fill('student@example.com')
             page.get_by_label('Password', exact=True).fill('test-password')
             page.get_by_role('button', name='Create account', exact=True).click()
-            playwright.expect(page.locator('button[data-tool]')).to_have_count(5)
             editor=page.get_by_role('textbox', name='Your response text')
             page.locator('#upload').set_input_files({'name':'course.md','mimeType':'text/markdown',
                 'buffer':b'# Binary Search\nBinary search narrows a sorted interval.'})
             playwright.expect(editor).to_be_editable()
+            playwright.expect(page.locator('button[data-tool]')).to_have_count(5)
             playwright.expect(page.locator('#material-name')).to_have_text('course.md')
             playwright.expect(page.locator('#graph .react-flow__node')).to_be_visible()
             playwright.expect(page.locator('#mastery')).to_contain_text('Not assessed yet')

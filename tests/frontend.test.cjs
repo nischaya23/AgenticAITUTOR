@@ -27,7 +27,7 @@ async function until(predicate) {
   throw Error('Expected UI update did not occur');
 }
 
-async function setup(t, { draft, authenticated = true } = {}) {
+async function setup(t, { draft, authenticated = true, openSession = true } = {}) {
   const dom = new JSDOM(html, { url: 'http://localhost:8000', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window;
@@ -43,6 +43,17 @@ async function setup(t, { draft, authenticated = true } = {}) {
   w.fetch = async (url, options) => {
     if (url === '/api/auth/me') return { ok: authenticated, status: authenticated ? 200 : 401,
       json: async () => authenticated ? {user: {id: 1, email: 'student@example.com'}} : {detail: 'Please log in.'} };
+    if (url === '/api/sessions') return { ok: true, json: async () => ({sessions: [
+      {id: 1, material_id: 'm1', title: 'course.md', created_at: '2026-11-09T10:00:00Z', ended: false},
+      {id: 2, material_id: 'm2', title: 'other-course.md', created_at: '2026-11-08T10:00:00Z', ended: false},
+    ]}) };
+    if (url === '/api/sessions/2/study') return {ok: true, json: async () => ({
+      ...study, state: {...study.state, workspace: 'Second chat reasoning'},
+      material: {...study.material, id: 'm2', name: 'other-course.md'},
+    })};
+    if (url === '/api/sessions/2') return {ok: true, json: async () => ({history: [
+      {id: 60, type: 'student_message', data: {content: 'Question from the second chat'}},
+    ]})};
     if(options?.method === 'PUT'){ const body=JSON.parse(options.body); requests.push(body); return {ok:true,json:async()=>({type:'plan',plan:body.plan,plan_version:body.expected_version+1})}; }
     if(url.endsWith('/next')){requests.push({path:url,...JSON.parse(options.body)});return {ok:true,json:async()=>({...study,state:{...study.state,current_problem:{id:'p2',prompt:'Next question'}}})};}
     return { ok: true, json: async () => url.endsWith('/study') ? study : { history: [] } };
@@ -62,9 +73,44 @@ async function setup(t, { draft, authenticated = true } = {}) {
   await entry.link(() => { throw Error('Unexpected static import in the built entry'); });
   await entry.evaluate();
   const document = w.document;
-  await until(() => document.querySelector(authenticated ? '#submit:not(:disabled)' : '#auth-email'));
-  return { document, messages, requests, intervals, window: w, dispatch: data => socket.onmessage({ data: JSON.stringify(data) }) };
+  await until(() => document.querySelector(authenticated ? '.new-chat-content' : '#auth-email'));
+  if (authenticated && openSession) {
+    const saved = await until(() => document.querySelector('.session-item'));
+    saved.click();
+    await until(() => document.querySelector('#submit:not(:disabled)'));
+  }
+  return { document, messages, requests, intervals, window: w, dispatch: data => socket.onmessage({ data: JSON.stringify(data) }),
+    captureDispatch: () => { const saved = socket; return data => saved.onmessage({data: JSON.stringify(data)}); } };
 }
+
+test('login starts a new chat and saved sessions can be opened and left', async t => {
+  const { document, dispatch, messages } = await setup(t, {openSession: false});
+  assert.equal(document.querySelector('#workspace'), null);
+  assert.equal(messages.length, 0);
+  const saved = await until(() => document.querySelector('.session-item'));
+  assert.match(saved.textContent, /course.md/);
+  saved.click();
+  await until(() => document.querySelector('#submit:not(:disabled)'));
+  dispatch({type: 'intervention', event_id: 50, revision: 1,
+    result: {type: 'hint', content: 'Help in the earlier chat.', metadata: {}}});
+  await until(() => document.querySelector('.intervention'));
+  document.querySelector('.new-chat-button').click();
+  await until(() => document.querySelector('.new-chat-content'));
+  assert.equal(document.querySelector('.intervention'), null);
+  assert.equal(document.querySelector('#workspace'), null);
+});
+
+test('switching chats restores their own conversation and ignores the previous socket', async t => {
+  const {document, captureDispatch} = await setup(t);
+  const previousSocket = captureDispatch();
+  [...document.querySelectorAll('.session-item')].find(button => button.textContent.includes('other-course.md')).click();
+  await until(() => document.querySelector('.cm-line')?.textContent === 'Second chat reasoning');
+  assert.match(document.querySelector('#interventions').textContent, /Question from the second chat/);
+  previousSocket({type: 'intervention', event_id: 99, revision: 1,
+    result: {type: 'hint', content: 'Stale first chat reply', metadata: {}}});
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.doesNotMatch(document.querySelector('#interventions').textContent, /Stale first chat reply/);
+});
 
 test('signed-out visitors see login and logout removes the study workspace', async t => {
   const guest = await setup(t, {authenticated: false});

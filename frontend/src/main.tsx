@@ -48,10 +48,12 @@ function Intervention({ result }: { result: Result }) {
   </>;
 }
 
-function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
-  const storageKey = 'studyroom-auto-session-' + user.id;
+function App({ user, logout, initialSession, onCreated, onUploadChange, onSessionsChange }: {
+  user: User; logout: () => Promise<void>; initialSession: number | null;
+  onCreated: (id: number) => void; onUploadChange: (uploading: boolean) => void; onSessionsChange: () => void;
+}) {
   const draftPrefix = 'studyroom-draft-' + user.id + '-';
-  const [sid, setSid] = useState(() => Number(localStorage.getItem(storageKey)) || null);
+  const [sid, setSid] = useState<number | null>(initialSession);
   const [study, setStudy] = useState<Study | null>(null);
   const [observer, setObserver] = useState<Observer>({});
   const [notice, setNotice] = useState('');
@@ -78,6 +80,13 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
   const responseRevision = useRef(0);
   const pendingEdits = useRef(0);
   const editTimer = useRef<number | undefined>(undefined);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const conversation = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = conversation.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [history.length, busy, study?.material.id]);
 
   function send(event: object) {
     if (ws.current?.readyState !== WebSocket.OPEN) {
@@ -241,19 +250,6 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
   }
 
   useEffect(() => {
-    if (sid) return;
-    let active = true;
-    void api<{ sessions: { id: number; material_id?: string }[] }>('/api/sessions').then(data => {
-      const saved = data.sessions.find(item => item.material_id);
-      if (active && saved) {
-        localStorage.setItem(storageKey, String(saved.id));
-        setSid(saved.id);
-      }
-    }).catch(error => { if (active) setNotice((error as Error).message); });
-    return () => { active = false; };
-  }, [sid]);
-
-  useEffect(() => {
     if (!sid || uploading) return;
     let stopped = false;
     let reconnect: number;
@@ -261,7 +257,8 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
     const path = '/api/sessions/' + sid;
     async function restore() {
       const view = await api<Study>(path + '/study');
-      return ((!view.state.plan?.steps?.length) || (view.state.current_problem.solved && !view.state.study_complete)) && !view.state.ended
+      return ((!view.state.current_problem.id) || (!view.state.plan?.steps?.length)
+        || (view.state.current_problem.solved && !view.state.study_complete)) && !view.state.ended
         ? post<Study>(path + '/study', { material_id: view.state.material_id }) : view;
     }
     function connect() {
@@ -273,6 +270,11 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
       socket.onopen = async () => {
         if (stopped || ws.current !== socket) return;
         try {
+          const data = await api<{ history: HistoryItem[] }>(path);
+          if (stopped || ws.current !== socket) return;
+          const saved = data.history.filter(item => item.type === 'student_message' || item.type === 'intervention');
+          setHistory(items => [...saved, ...items.filter(item => !saved.some(old => old.id === item.id))]
+            .sort((a, b) => a.id - b.id));
           const view = await restore();
           if (stopped || ws.current !== socket || socket.readyState !== WebSocket.OPEN) return;
           applyStudy(view);
@@ -296,14 +298,7 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
         reconnect = window.setTimeout(connect, 2000);
       };
     }
-    void api<{ history: HistoryItem[] }>(path).then(data => {
-      if (stopped) return;
-      const saved = data.history.filter(item => item.type === 'student_message' || item.type === 'intervention');
-      setHistory(items => [...saved, ...items.filter(item => !saved.some(old => old.id === item.id))]);
-      connect();
-    }).catch(error => {
-      if (!stopped) setNotice((error as Error).message);
-    });
+    connect();
     const idle = window.setInterval(() => {
       if (!document.hidden && current.current?.state.current_problem.id
           && !current.current.state.current_problem.solved && !current.current.state.study_complete && !current.current.state.ended
@@ -337,6 +332,7 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
   async function begin(message: string, makeMaterial: () => Promise<{ id: string }>) {
     setUploading(true);
     setProgressMessage(message);
+    onUploadChange(true);
     setConnected(false);
     setNotice('');
     try {
@@ -347,13 +343,15 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
       setHistory([]);
       setChat(''); setSummary(''); setAssessment(''); setMemoryActivity('');
       revision.current = 0;
-      localStorage.setItem(storageKey, String(session.id));
       applyStudy(next, session.id);
       setSid(session.id);
+      onCreated(session.id);
     } catch (error) {
       setNotice((error as Error).message);
     } finally {
       setUploading(false);
+      onUploadChange(false);
+      onSessionsChange();
     }
   }
 
@@ -397,7 +395,7 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
         : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
         : study?.material.name ?? 'Upload material or search a topic to begin'}
     </span><label className="upload" title="Select one or more PDF, TXT or Markdown files (up to 10)">Upload materials
-      <input id="upload" type="file" accept=".pdf,.txt,.md" multiple
+      <input ref={uploadInput} id="upload" type="file" accept=".pdf,.txt,.md" multiple
       disabled={uploading} onChange={event => {
         const files = Array.from(event.target.files ?? []);
         event.target.value = '';
@@ -417,7 +415,40 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
         }}>Log out</button></div>
     </header>
     {notice && <p id="notice" role="alert">{notice}</p>}
-    <main>
+    <main className={study ? 'study-layout' : 'new-chat'}>
+      {!study ? <section className="new-chat-content">
+        <p className="eyebrow">{sid ? 'STUDY CHAT' : 'NEW CHAT'}</p>
+        <h1>{sid ? 'Opening your chat…' : 'What would you like to learn?'}</h1>
+        <p>{sid ? 'Restoring your conversation and workspace.' : 'Upload your notes or search a topic to start a study chat. Earlier chats are in the sidebar.'}</p>
+        <button type="button" disabled={uploading} onClick={() => uploadInput.current?.click()}>
+          {uploading ? 'Preparing your study chat…' : 'Upload your notes'}
+        </button>
+        {uploading && <p role="status">{progressMessage}</p>}
+        <p className="muted">PDF, Markdown, or text</p>
+      </section> : <>
+        <section className="panel chat chat-panel" aria-label="Tutor chat">
+          <h2>Tutor chat</h2>
+          <div ref={conversation} id="interventions" role="log" aria-live="polite">
+            {!history.length && <p className="muted">Ask a question or use a teaching tool to start the conversation.</p>}
+            {history.map(item => item.type === 'student_message'
+              ? <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>
+              : <article className="intervention" key={item.id}>
+                <Intervention result={item.data} />
+                {observer.feedback_intervention_id === item.id && !inactive &&
+                  <div className="player-controls">{([1, -1] as const).map(rating =>
+                    <button type="button" key={rating} disabled={!connected || busy} onClick={() => {
+                      if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
+                        ({ ...status, feedback_intervention_id: null }));
+                    }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
+              </article>)}
+          </div>
+          {busy && <p id="busy" role="status">Your tutor is working…</p>}
+          <form onSubmit={event => { event.preventDefault(); ask(chat); }}>
+            <label htmlFor="chat">Ask your tutor</label>
+            <div className="answer-row"><input id="chat" maxLength={20000} value={chat} onChange={event => setChat(event.target.value)} disabled={disabled} />
+              <button disabled={disabled || busy || !chat.trim()}>Send</button></div>
+          </form>
+        </section>
       <section className="panel question-panel">
         <p className="eyebrow">CURRENT TOPIC</p>
         <h1 id="concept">{study?.state.study_complete ? 'Material complete' : study?.state.current_concept ?? 'Your next learning step'}</h1>
@@ -483,28 +514,6 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
           <button id="skip" type="button" disabled={disabled || busy} onClick={skip}>Skip question</button></div>
         <p id="assessment" aria-live="polite">{assessment}</p>
         {memoryActivity && <details className="memory-notice"><summary>Learning update</summary><p>{memoryActivity}</p></details>}
-        <section className="chat" aria-label="Tutor chat">
-          <h2>Tutor chat</h2>
-          <form onSubmit={event => { event.preventDefault(); ask(chat); }}>
-            <label htmlFor="chat">Ask your tutor</label>
-            <div className="answer-row"><input id="chat" maxLength={20000} value={chat} onChange={event => setChat(event.target.value)} disabled={disabled} />
-              <button disabled={disabled || busy || !chat.trim()}>Send</button></div>
-          </form>
-          <div id="interventions" role="log" aria-live="polite">
-            {history.map(item => item.type === 'student_message'
-              ? <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>
-              : <article className="intervention" key={item.id}>
-                <Intervention result={item.data} />
-                {observer.feedback_intervention_id === item.id && !inactive &&
-                  <div className="player-controls">{([1, -1] as const).map(rating =>
-                    <button type="button" key={rating} disabled={!connected || busy} onClick={() => {
-                      if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
-                        ({ ...status, feedback_intervention_id: null }));
-                    }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
-              </article>)}
-          </div>
-          {busy && <p id="busy" role="status">Your tutor is working…</p>}
-        </section>
         {study && !study.state.ended && <button type="button" disabled={!connected || pending || busy || uploading}
           onClick={() => { if (flushEdits() && send({ type: 'session_end' })) setPending(true); }}>End session</button>}
         {summary && <p role="status">{summary}</p>}
@@ -523,11 +532,62 @@ function App({ user, logout }: { user: User; logout: () => Promise<void> }) {
             {study.material.sources!.map(source => <li key={source}>{source}</li>)}</ul>}
           <pre>{study.material.chunks[0]?.text}</pre></details>}
       </aside>
+      </>}
     </main>
   </MotionConfig>;
 }
 
+type SavedSession = { id: number; material_id?: string; title: string; created_at: string; ended: boolean; complete: boolean };
+
+function ChatSessions({ user, logout }: { user: User; logout: () => Promise<void> }) {
+  const [sessions, setSessions] = useState<SavedSession[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [version, setVersion] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    void api<{ sessions: SavedSession[] }>('/api/sessions').then(data => {
+      if (active) { setSessions(data.sessions.filter(session => session.material_id)); setError(''); }
+    }).catch(failure => { if (active) setError((failure as Error).message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [refresh]);
+
+  return <div className="chat-app">
+    <aside className="session-sidebar" aria-label="Chat sessions">
+      <strong className="sidebar-brand">Studyroom</strong>
+      <button className="new-chat-button" type="button" disabled={uploading} onClick={() => {
+        setSelected(null); setVersion(value => value + 1); setRefresh(value => value + 1);
+      }}>＋ New chat</button>
+      <p className="eyebrow">YOUR CHATS</p>
+      {loading && <p role="status" className="muted">Loading chats…</p>}
+      {error && <div role="alert"><p>{error}</p><button type="button"
+        onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
+      {!loading && !error && !sessions.length && <p className="muted">Your study chats will appear here.</p>}
+      <nav aria-label="Previous chats">
+        {sessions.map(session => <button key={session.id} type="button" className="session-item"
+          aria-current={selected === session.id ? 'page' : undefined} disabled={uploading}
+          onClick={() => setSelected(session.id)}>
+          <span className="session-title">{session.title}</span>
+          <span className="session-date">{new Date(session.created_at).toLocaleDateString(undefined, {
+            month: 'short', day: 'numeric', year: 'numeric',
+          })}{session.ended ? ' · Ended' : session.complete ? ' · Complete' : ''}</span>
+        </button>)}
+      </nav>
+    </aside>
+    <div className="chat-main">
+      <App key={(selected ?? 'new') + ':' + version} user={user} logout={logout}
+        initialSession={selected} onCreated={setSelected} onUploadChange={setUploading}
+        onSessionsChange={() => setRefresh(value => value + 1)} />
+    </div>
+  </div>;
+}
+
 createRoot(document.getElementById('root')!).render(
-  <Auth>{(user, logout) => <App key={user.id} user={user} logout={logout} />}</Auth>,
+  <Auth>{(user, logout) => <ChatSessions key={user.id} user={user} logout={logout} />}</Auth>,
 );
 
