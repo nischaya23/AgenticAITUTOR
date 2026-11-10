@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { MotionConfig } from 'motion/react';
 import Auth, { authExpired, type User } from './Auth';
 import Icon from './Icon';
@@ -50,10 +51,11 @@ function Intervention({ result }: { result: Result }) {
   </>;
 }
 
-function App({ user, logout, initialSession, onCreated, onUploadChange, onSessionsChange, onMenu, menuOpen }: {
+function App({ user, logout, initialSession, onCreated, onUploadChange, onSessionsChange, onMenu, menuOpen, logoutTarget }: {
   user: User; logout: () => Promise<void>; initialSession: number | null;
   onCreated: (id: number) => void; onUploadChange: (uploading: boolean) => void; onSessionsChange: () => void;
   onMenu: () => void; menuOpen: boolean;
+  logoutTarget: HTMLElement | null;
 }) {
   const draftPrefix = 'studyroom-draft-' + user.id + '-';
   const [sid, setSid] = useState<number | null>(initialSession);
@@ -405,22 +407,17 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const mastery = activeNode?.mastery;
 
   return <MotionConfig reducedMotion="user">
-    <header className="app-header">
+    <div className="mobile-toolbar">
       <button className="icon-button mobile-menu" type="button" aria-label="Open chat sessions"
         aria-expanded={menuOpen} onClick={onMenu}><Icon name="menu" /></button>
-      <div className="header-location"><span id="status" role="status">
-      {study?.state.study_complete ? 'Learning target reached'
-        : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
-        : study?.material.name ?? 'New chat'}
-    </span></div>
-      <div className="account-controls"><button type="button"
+    </div>
+    {logoutTarget && createPortal(<button className="logout-button" type="button"
         disabled={uploading || pending || busy} onClick={async () => {
           try {
             flushEdits();
             await logout();
           } catch { setNotice('Could not log out. Please try again.'); }
-        }}>Log out</button></div>
-    </header>
+        }}>Log out</button>, logoutTarget)}
     {notice && <p id="notice" role="alert">{notice}</p>}
     <main className={study ? 'study-layout' : 'new-chat'}>
       {!study ? <section className="new-chat-content">
@@ -553,7 +550,9 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       </div>
         <section className="panel chat chat-panel" aria-label="Tutor chat">
           <div className="conversation-heading"><span className="tutor-avatar"><Icon name="spark" /></span>
-            <div><h2>Tutor chat</h2><p><span className={'status-dot' + (connected ? ' online' : '')} />{connected ? 'Ready when you are' : 'Connecting…'}</p></div></div>
+            <div><h2>Tutor chat</h2><p><span className={'status-dot' + (connected && !inactive ? ' online' : '')} />
+              {study.state.ended ? 'Session ended' : study.state.study_complete ? 'Learning target reached'
+                : connected ? 'Ready when you are' : 'Connecting…'}</p></div></div>
           <div ref={conversation} id="interventions" role="log" aria-live="polite">
             {!history.length && <div className="conversation-welcome"><Icon name="chat" />
               <h3>Let’s work through it.</h3><p>Ask about {study.state.current_concept}, request a hint, or try the question in your workspace.</p>
@@ -603,6 +602,7 @@ function ChatSessions({ user, logout }: { user: User; logout: () => Promise<void
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoutTarget, setLogoutTarget] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -647,12 +647,14 @@ function ChatSessions({ user, logout }: { user: User; logout: () => Promise<void
       <div className="sidebar-footer"><ThemeToggle />
         <div className="user-profile"><span className="user-avatar">{user.email.charAt(0).toUpperCase()}</span>
           <span><strong>Your workspace</strong><small title={user.email}>{user.email}</small></span></div>
+        <div className="profile-actions" ref={setLogoutTarget} />
       </div>
     </aside>
     <div className="chat-main">
       <App key={(selected ?? 'new') + ':' + version} user={user} logout={logout}
         initialSession={selected} onCreated={setSelected} onUploadChange={setUploading}
-        onSessionsChange={() => setRefresh(value => value + 1)} onMenu={() => setMenuOpen(true)} menuOpen={menuOpen} />
+        onSessionsChange={() => setRefresh(value => value + 1)} onMenu={() => setMenuOpen(true)} menuOpen={menuOpen}
+        logoutTarget={logoutTarget} />
     </div>
   </div>;
 }
