@@ -3,6 +3,7 @@ import Konva from 'konva';
 import { Arrow, Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import { useReducedMotion } from 'motion/react';
 import type { Scene, SceneObject } from './types';
+import { useTheme } from './Theme';
 
 const width = 800;
 const height = 450;
@@ -11,6 +12,12 @@ const palette = {
   accent: { fill: '#dce9ff', stroke: '#2959a6' },
   success: { fill: '#def2e3', stroke: '#2f7149' },
   warning: { fill: '#ffedcc', stroke: '#92501a' },
+};
+const darkPalette = {
+  neutral: { fill: '#263334', stroke: '#99b2a8' },
+  accent: { fill: '#293f56', stroke: '#94bce9' },
+  success: { fill: '#2c422d', stroke: '#b6d293' },
+  warning: { fill: '#534328', stroke: '#e8c78b' },
 };
 type ObjectState = SceneObject & { visible: boolean };
 
@@ -30,7 +37,7 @@ function sceneFrame(scene: Scene, index: number) {
   return [...objects.values()];
 }
 
-function SceneShape({ object, duration }: { object: ObjectState; duration: number }) {
+function SceneShape({ object, duration, dark }: { object: ObjectState; duration: number; dark: boolean }) {
   const group = useRef<Konva.Group>(null);
   const initialized = useRef(false);
   const { x, y, visible } = object;
@@ -47,10 +54,10 @@ function SceneShape({ object, duration }: { object: ObjectState; duration: numbe
     return () => { tween.destroy(); };
   }, [x, y, visible, duration]);
 
-  const colors = palette[object.tone];
+  const colors = (dark ? darkPalette : palette)[object.tone];
   const caption = 'label' in object && object.label;
   const textStyle = { fontFamily: 'system-ui, sans-serif', fontSize: 18, ellipsis: true,
-    fill: '#1c332b', lineHeight: 1.15 };
+    fill: dark ? '#e8ede7' : '#1c332b', lineHeight: 1.15 };
   return <Group ref={group}>
     {object.kind === 'rect' && <>
       <Rect width={object.width} height={object.height} cornerRadius={7} {...colors} strokeWidth={2} />
@@ -75,6 +82,7 @@ function SceneShape({ object, duration }: { object: ObjectState; duration: numbe
 }
 
 export default function SceneCanvas({ scene, index, speed }: { scene: Scene; index: number; speed: number }) {
+  const { theme } = useTheme();
   const host = useRef<HTMLDivElement>(null);
   const [displayWidth, setDisplayWidth] = useState(0);
   const reducedMotion = useReducedMotion();
@@ -94,7 +102,7 @@ export default function SceneCanvas({ scene, index, speed }: { scene: Scene; ind
     aria-label={description ? scene.title + '. ' + description : scene.title}>
     {displayWidth > 0 && <Stage width={displayWidth} height={height * scale} scaleX={scale} scaleY={scale}>
       <Layer listening={false}>
-        {objects.map(object => <SceneShape key={object.id} object={object}
+        {objects.map(object => <SceneShape key={object.id} object={object} dark={theme === 'dark'}
           duration={reducedMotion ? 0 : 0.36 / speed} />)}
       </Layer>
     </Stage>}

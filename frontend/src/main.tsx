@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MotionConfig } from 'motion/react';
 import Auth, { authExpired, type User } from './Auth';
+import Icon from './Icon';
+import { ThemeProvider, ThemeToggle } from './Theme';
 import LearningPlanPanel from './LearningPlan';
 import DiagramView, { emptyDiagram } from './Diagram';
 import Hypotheses from './Hypotheses';
@@ -48,9 +50,10 @@ function Intervention({ result }: { result: Result }) {
   </>;
 }
 
-function App({ user, logout, initialSession, onCreated, onUploadChange, onSessionsChange }: {
+function App({ user, logout, initialSession, onCreated, onUploadChange, onSessionsChange, onMenu, menuOpen }: {
   user: User; logout: () => Promise<void>; initialSession: number | null;
   onCreated: (id: number) => void; onUploadChange: (uploading: boolean) => void; onSessionsChange: () => void;
+  onMenu: () => void; menuOpen: boolean;
 }) {
   const draftPrefix = 'studyroom-draft-' + user.id + '-';
   const [sid, setSid] = useState<number | null>(initialSession);
@@ -58,8 +61,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const [observer, setObserver] = useState<Observer>({});
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [topic, setTopic] = useState('');
-  const [progressMessage, setProgressMessage] = useState('');
   const [connected, setConnected] = useState(false);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -71,6 +72,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [summary, setSummary] = useState('');
+  const [studyTab, setStudyTab] = useState<'workspace' | 'map'>('workspace');
   const ws = useRef<WebSocket | null>(null);
   const current = useRef<Study | null>(null);
   const workspace = useRef('');
@@ -80,7 +82,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const responseRevision = useRef(0);
   const pendingEdits = useRef(0);
   const editTimer = useRef<number | undefined>(undefined);
-  const uploadInput = useRef<HTMLInputElement>(null);
   const conversation = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -138,6 +139,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       || current.current?.material.id !== view.material.id;
     current.current = view;
     if (changed) {
+      setStudyTab('workspace');
       window.clearTimeout(editTimer.current);
       const saved = serverResponse;
       sent.current = JSON.stringify(saved);
@@ -214,6 +216,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         if (message.proactive && stale) break;
         const { result } = message;
         if (result.type === 'highlight' && !stale) {
+          setStudyTab('workspace');
           const items = result.metadata.annotations ?? [];
           setAnnotations(items.every(item => annotationRange(workspace.current, item)) ? items : []);
           setDiagramAnnotations((result.metadata.diagram_annotations ?? []).filter(item =>
@@ -314,30 +317,15 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     };
   }, [sid, uploading]);
 
-  function upload(files: File[]) {
+  async function upload(files: File[]) {
     const form = new FormData();
     for (const file of files) form.append('files', file);
-    void begin('Building one learning graph from your materials…',
-      () => api<{ id: string }>('/api/materials', { method: 'POST', body: form }));
-  }
-
-  function studyTopic(event: FormEvent) {
-    event.preventDefault();
-    const value = topic.trim();
-    if (value.length < 2) return;
-    void begin('Searching the web for “' + value + '” and building your learning graph…',
-      () => post<{ id: string }>('/api/materials/web', { topic: value }));
-  }
-
-  async function begin(message: string, makeMaterial: () => Promise<{ id: string }>) {
     setUploading(true);
-    setProgressMessage(message);
     onUploadChange(true);
     setConnected(false);
     setNotice('');
     try {
-      const material = await makeMaterial();
-      setTopic('');
+      const material = await api<{ id: string }>('/api/materials', { method: 'POST', body: form });
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
       setHistory([]);
@@ -361,6 +349,10 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       setBusy(true);
       setChat('');
     }
+  }
+
+  function requestTool(tool: Tool) {
+    if (!disabled && !busy && flushEdits() && send({ type: 'student_action', action: 'hint_request', tool })) setBusy(true);
   }
 
   function submit(event: FormEvent) {
@@ -390,23 +382,15 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const mastery = activeNode?.mastery;
 
   return <MotionConfig reducedMotion="user">
-    <header><strong>Studyroom</strong><span id="status" role="status">
-      {uploading ? progressMessage : study?.state.study_complete ? 'Learning target reached'
+    <header className="app-header">
+      <button className="icon-button mobile-menu" type="button" aria-label="Open chat sessions"
+        aria-expanded={menuOpen} onClick={onMenu}><Icon name="menu" /></button>
+      <div className="header-location"><span id="status" role="status">
+      {study?.state.study_complete ? 'Learning target reached'
         : study?.state.ended ? 'Session ended' : study && !connected ? 'Connecting…'
-        : study?.material.name ?? 'Upload material or search a topic to begin'}
-    </span><label className="upload" title="Select one or more PDF, TXT or Markdown files (up to 10)">Upload materials
-      <input ref={uploadInput} id="upload" type="file" accept=".pdf,.txt,.md" multiple
-      disabled={uploading} onChange={event => {
-        const files = Array.from(event.target.files ?? []);
-        event.target.value = '';
-        if (files.length) upload(files);
-      }} /></label>
-      <form className="web-topic" role="search" onSubmit={studyTopic}>
-        <input id="web-topic" type="search" placeholder="Or study a topic from the web…" aria-label="Topic to study from the web"
-          value={topic} maxLength={200} disabled={uploading} onChange={event => setTopic(event.target.value)} />
-        <button id="web-search" type="submit" disabled={uploading || topic.trim().length < 2}>Search web</button>
-      </form>
-      <div className="account-controls"><span>{user.email}</span><button type="button"
+        : study?.material.name ?? 'New chat'}
+    </span></div>
+      <div className="account-controls"><button type="button"
         disabled={uploading || pending || busy} onClick={async () => {
           try {
             flushEdits();
@@ -417,51 +401,51 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     {notice && <p id="notice" role="alert">{notice}</p>}
     <main className={study ? 'study-layout' : 'new-chat'}>
       {!study ? <section className="new-chat-content">
-        <p className="eyebrow">{sid ? 'STUDY CHAT' : 'NEW CHAT'}</p>
-        <h1>{sid ? 'Opening your chat…' : 'What would you like to learn?'}</h1>
-        <p>{sid ? 'Restoring your conversation and workspace.' : 'Upload your notes or search a topic to start a study chat. Earlier chats are in the sidebar.'}</p>
-        <button type="button" disabled={uploading} onClick={() => uploadInput.current?.click()}>
-          {uploading ? 'Preparing your study chat…' : 'Upload your notes'}
-        </button>
-        {uploading && <p role="status">{progressMessage}</p>}
-        <p className="muted">PDF, Markdown, or text</p>
+        <span className="hero-symbol"><Icon name="book" /></span>
+        <h1>{sid ? 'Opening your chat…' : 'Upload your notes'}</h1>
+        {!sid && <>
+          <label className="upload upload-card">
+            <Icon name="upload" /><span>{uploading ? 'Preparing your session…' : 'Choose files'}</span>
+            <input id="upload" type="file" accept=".pdf,.txt,.md" multiple disabled={uploading}
+              onChange={event => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = '';
+                if (files.length) void upload(files);
+              }} />
+          </label>
+          <p className="muted">PDF, Markdown, or text</p>
+        </>}
       </section> : <>
-        <section className="panel chat chat-panel" aria-label="Tutor chat">
-          <h2>Tutor chat</h2>
-          <div ref={conversation} id="interventions" role="log" aria-live="polite">
-            {!history.length && <p className="muted">Ask a question or use a teaching tool to start the conversation.</p>}
-            {history.map(item => item.type === 'student_message'
-              ? <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>
-              : <article className="intervention" key={item.id}>
-                <Intervention result={item.data} />
-                {observer.feedback_intervention_id === item.id && !inactive &&
-                  <div className="player-controls">{([1, -1] as const).map(rating =>
-                    <button type="button" key={rating} disabled={!connected || busy} onClick={() => {
-                      if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
-                        ({ ...status, feedback_intervention_id: null }));
-                    }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
-              </article>)}
-          </div>
-          {busy && <p id="busy" role="status">Your tutor is working…</p>}
-          <form onSubmit={event => { event.preventDefault(); ask(chat); }}>
-            <label htmlFor="chat">Ask your tutor</label>
-            <div className="answer-row"><input id="chat" maxLength={20000} value={chat} onChange={event => setChat(event.target.value)} disabled={disabled} />
-              <button disabled={disabled || busy || !chat.trim()}>Send</button></div>
-          </form>
-        </section>
-      <section className="panel question-panel">
+      <div className="study-dock">
+        <div className="dock-tabs" role="tablist" aria-label="Study tools" onKeyDown={event => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === 'Home' ? 'workspace' : event.key === 'End' ? 'map'
+            : studyTab === 'workspace' ? 'map' : 'workspace';
+          setStudyTab(next);
+          document.getElementById(next === 'workspace' ? 'workspace-tab' : 'map-tab')?.focus();
+        }}>
+          <button id="workspace-tab" role="tab" aria-selected={studyTab === 'workspace'} aria-controls="workspace-panel"
+            tabIndex={studyTab === 'workspace' ? 0 : -1}
+            onClick={() => setStudyTab('workspace')}>Workspace</button>
+          <button id="map-tab" role="tab" aria-selected={studyTab === 'map'} aria-controls="map-panel"
+            tabIndex={studyTab === 'map' ? 0 : -1}
+            onClick={() => setStudyTab('map')}>Learning map</button>
+        </div>
+      <section id="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab" hidden={studyTab !== 'workspace'} className="panel question-panel">
         <p className="eyebrow">CURRENT TOPIC</p>
         <h1 id="concept">{study?.state.study_complete ? 'Material complete' : study?.state.current_concept ?? 'Your next learning step'}</h1>
         <div className="mastery"><span id="mastery">Estimated mastery: {mastery == null ? 'Not assessed yet' : Math.round(mastery * 100) + '%'}</span>
           {mastery != null && <progress max={1} value={mastery} aria-label="Estimated mastery" />}</div>
         <p className="muted">An estimate from your answers.</p>
         <p id="problem" className="problem">{study?.state.study_complete ? 'Every concept has reached the current progression target.'
-          : problem?.prompt ?? 'Upload lecture notes or search the web for a topic to build a concept graph and get your first question.'}</p>
-        <div id="observer-status" role="status">Observer: {observer.decision ?? 'Waiting'} · {observer.reason ?? 'Waiting for activity'}</div>
-        <details><summary>Observer details</summary><pre>{JSON.stringify(observer, null, 2)}</pre></details>
-        {sid && study && <LearningPlanPanel key={sid + ':' + study.material.id} sessionId={sid}
+          : problem?.prompt ?? 'Your first question will appear here.'}</p>
+        <details className="observer-panel"><summary>Tutor activity</summary>
+          <div id="observer-status" role="status">{observer.reason ?? 'Waiting for activity'}</div>
+          <pre>{JSON.stringify(observer, null, 2)}</pre></details>
+        {sid && study && <details className="plan-details"><summary>Your learning plan</summary><LearningPlanPanel key={sid + ':' + study.material.id} sessionId={sid}
           value={{ type: 'plan', plan: study.state.plan ?? {}, plan_version: study.state.plan_version ?? 0, plan_suggestion: study.state.plan_suggestion }}
-          disabled={!connected || uploading || study.state.ended} onChange={value => { if(current.current?.material.id === study.material.id) applyPlan(value); }} />}
+          disabled={!connected || uploading || study.state.ended} onChange={value => { if(current.current?.material.id === study.material.id) applyPlan(value); }} /></details>}
         {problem?.format && <p className="eyebrow">{label(problem.format)}</p>}
         {problem?.diagram && <DiagramView value={problem.diagram} label="Question diagram" />}
         <h3>Your response</h3>
@@ -507,18 +491,14 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
             try { applyStudy(await post<Study>('/api/sessions/' + sid + '/next', { problem_id: problem?.id })); }
             catch (error) { setNotice((error as Error).message); } finally { setPending(false); }
           }}>Retry next question</button></div>}
-        <div id="manual-tools">{tools.map(tool => <button type="button" key={tool} data-tool={tool} disabled={disabled || busy}
-          onClick={() => {
-            if (flushEdits() && send({ type: 'student_action', action: 'hint_request', tool })) setBusy(true);
-          }}>{label(tool)}</button>)}
-          <button id="skip" type="button" disabled={disabled || busy} onClick={skip}>Skip question</button></div>
+        <button id="skip" className="text-button" type="button" disabled={disabled || busy} onClick={skip}>Skip question</button>
         <p id="assessment" aria-live="polite">{assessment}</p>
         {memoryActivity && <details className="memory-notice"><summary>Learning update</summary><p>{memoryActivity}</p></details>}
         {study && !study.state.ended && <button type="button" disabled={!connected || pending || busy || uploading}
           onClick={() => { if (flushEdits() && send({ type: 'session_end' })) setPending(true); }}>End session</button>}
         {summary && <p role="status">{summary}</p>}
       </section>
-      <aside className="panel graph-panel">
+      <section id="map-panel" role="tabpanel" aria-labelledby="map-tab" hidden={studyTab !== 'map'} className="panel graph-panel">
         <p className="eyebrow">YOUR LEARNING MAP</p><h2>Concept graph</h2>
         <p className="muted">Arrows point from a prerequisite to the next concept.</p>
         <div id="graph">{study ? <FlowGraph key={study.material.id} graph={study.graph}
@@ -531,7 +511,44 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
             : (study.material.sources?.length ?? 0) > 1 && <ul id="material-sources" className="muted">
             {study.material.sources!.map(source => <li key={source}>{source}</li>)}</ul>}
           <pre>{study.material.chunks[0]?.text}</pre></details>}
-      </aside>
+      </section>
+      </div>
+        <section className="panel chat chat-panel" aria-label="Tutor chat">
+          <div className="conversation-heading"><span className="tutor-avatar"><Icon name="spark" /></span>
+            <div><h2>Tutor chat</h2><p><span className={'status-dot' + (connected ? ' online' : '')} />{connected ? 'Ready when you are' : 'Connecting…'}</p></div></div>
+          <div ref={conversation} id="interventions" role="log" aria-live="polite">
+            {!history.length && <div className="conversation-welcome"><Icon name="chat" />
+              <h3>Let’s work through it.</h3><p>Ask about {study.state.current_concept}, request a hint, or try the question in your workspace.</p>
+              <button type="button" disabled={disabled || busy} onClick={() => requestTool('guiding_question')}>Help me get started<Icon name="arrow" /></button>
+            </div>}
+            {history.map(item => item.type === 'student_message'
+              ? <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>
+              : <article className="intervention" key={item.id}>
+                <Intervention result={item.data} />
+                {observer.feedback_intervention_id === item.id && !inactive &&
+                  <div className="player-controls">{([1, -1] as const).map(rating =>
+                    <button type="button" key={rating} disabled={!connected || busy} onClick={() => {
+                      if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
+                        ({ ...status, feedback_intervention_id: null }));
+                    }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
+              </article>)}
+          </div>
+          {busy && <p id="busy" role="status">Your tutor is working…</p>}
+          <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(chat); }}>
+            <label className="sr-only" htmlFor="chat">Ask your tutor</label>
+            <textarea id="chat" rows={2} placeholder="Ask a question, or tell me where you’re stuck…"
+              maxLength={20000} value={chat} onChange={event => setChat(event.target.value)} disabled={disabled}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault(); event.currentTarget.form?.requestSubmit();
+                }
+              }} />
+            <div className="composer-footer"><span>Enter to send · Shift + Enter for a new line</span>
+              <button aria-label="Send" disabled={disabled || busy || !chat.trim()}><Icon name="arrow" /></button></div>
+          </form>
+          <div id="manual-tools">{tools.map(tool => <button type="button" key={tool} data-tool={tool} disabled={disabled || busy}
+            onClick={() => requestTool(tool)}>{label(tool)}</button>)}</div>
+        </section>
       </>}
     </main>
   </MotionConfig>;
@@ -547,6 +564,14 @@ function ChatSessions({ user, logout }: { user: User; logout: () => Promise<void
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [menuOpen]);
 
   useEffect(() => {
     let active = true;
@@ -557,13 +582,16 @@ function ChatSessions({ user, logout }: { user: User; logout: () => Promise<void
     return () => { active = false; };
   }, [refresh]);
 
-  return <div className="chat-app">
+  return <div className={'chat-app' + (menuOpen ? ' menu-open' : '')}>
+    {menuOpen && <button className="sidebar-backdrop" aria-label="Close chat sessions" onClick={() => setMenuOpen(false)} />}
     <aside className="session-sidebar" aria-label="Chat sessions">
-      <strong className="sidebar-brand">Studyroom</strong>
+      <div className="sidebar-heading"><strong className="sidebar-brand"><span className="brand-mark"><Icon name="book" /></span>Studyroom<span className="brand-dot">.</span></strong>
+        <button className="icon-button mobile-menu" aria-label="Close chat sessions" onClick={() => setMenuOpen(false)}><Icon name="close" /></button></div>
       <button className="new-chat-button" type="button" disabled={uploading} onClick={() => {
         setSelected(null); setVersion(value => value + 1); setRefresh(value => value + 1);
-      }}>＋ New chat</button>
-      <p className="eyebrow">YOUR CHATS</p>
+        setMenuOpen(false);
+      }}><Icon name="plus" />New chat<span className="new-chat-shortcut">↗</span></button>
+      <div className="sidebar-section-title"><p className="eyebrow">RECENT CHATS</p><span>{sessions.length}</span></div>
       {loading && <p role="status" className="muted">Loading chats…</p>}
       {error && <div role="alert"><p>{error}</p><button type="button"
         onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
@@ -571,23 +599,27 @@ function ChatSessions({ user, logout }: { user: User; logout: () => Promise<void
       <nav aria-label="Previous chats">
         {sessions.map(session => <button key={session.id} type="button" className="session-item"
           aria-current={selected === session.id ? 'page' : undefined} disabled={uploading}
-          onClick={() => setSelected(session.id)}>
-          <span className="session-title">{session.title}</span>
+          onClick={() => { setSelected(session.id); setMenuOpen(false); }}>
+          <Icon name="chat" /><span className="session-copy"><span className="session-title">{session.title}</span>
           <span className="session-date">{new Date(session.created_at).toLocaleDateString(undefined, {
             month: 'short', day: 'numeric', year: 'numeric',
-          })}{session.ended ? ' · Ended' : session.complete ? ' · Complete' : ''}</span>
+          })}{session.ended ? ' · Ended' : session.complete ? ' · Complete' : ''}</span></span>
         </button>)}
       </nav>
+      <div className="sidebar-footer"><ThemeToggle />
+        <div className="user-profile"><span className="user-avatar">{user.email.charAt(0).toUpperCase()}</span>
+          <span><strong>Your workspace</strong><small title={user.email}>{user.email}</small></span></div>
+      </div>
     </aside>
     <div className="chat-main">
       <App key={(selected ?? 'new') + ':' + version} user={user} logout={logout}
         initialSession={selected} onCreated={setSelected} onUploadChange={setUploading}
-        onSessionsChange={() => setRefresh(value => value + 1)} />
+        onSessionsChange={() => setRefresh(value => value + 1)} onMenu={() => setMenuOpen(true)} menuOpen={menuOpen} />
     </div>
   </div>;
 }
 
 createRoot(document.getElementById('root')!).render(
-  <Auth>{(user, logout) => <ChatSessions key={user.id} user={user} logout={logout} />}</Auth>,
+  <ThemeProvider><Auth>{(user, logout) => <ChatSessions key={user.id} user={user} logout={logout} />}</Auth></ThemeProvider>,
 );
 

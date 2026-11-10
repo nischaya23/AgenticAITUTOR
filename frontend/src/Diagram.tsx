@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Background, Controls, MarkerType, ReactFlow, type Connection, type NodeChange, type EdgeChange } from '@xyflow/react';
 import type { Diagram, DiagramAnnotation } from './types';
+import { useTheme } from './Theme';
 import '@xyflow/react/dist/style.css';
 
 export const emptyDiagram = (): Diagram => ({ nodes: [], edges: [] });
@@ -10,6 +11,7 @@ export default function DiagramView({ value, onChange, disabled = false, annotat
   value: Diagram; onChange?: (diagram: Diagram) => void; disabled?: boolean;
   annotations?: DiagramAnnotation[]; label?: string;
 }) {
+  const { theme } = useTheme();
   const [source, setSource] = useState('');
   const [target, setTarget] = useState('');
   const [selection, setSelection] = useState<string[]>([]);
@@ -20,7 +22,7 @@ export default function DiagramView({ value, onChange, disabled = false, annotat
     className: issue('node', node.id).length ? 'diagram-issue' : '' }));
   const edges = value.edges.map(edge => ({ ...edge, selected: selection.includes(edge.id),
     markerEnd: { type: MarkerType.ArrowClosed },
-    style: { stroke: issue('edge', edge.id).length ? '#b32335' : '#687f6c', strokeWidth: issue('edge', edge.id).length ? 4 : 2 } }));
+    style: { stroke: issue('edge', edge.id).length ? (theme === 'dark' ? '#ee929c' : '#b32335') : '#7d9387', strokeWidth: issue('edge', edge.id).length ? 4 : 2 } }));
   function connect(connection: Connection) {
     if (!editing || value.edges.length >= 60 || !connection.source || !connection.target) return;
     onChange?.({ ...value, edges: [...value.edges, { id: uid(), source: connection.source, target: connection.target }] });
@@ -47,7 +49,7 @@ export default function DiagramView({ value, onChange, disabled = false, annotat
     if (removed.size) onChange?.({ ...value, edges: value.edges.filter(e => !removed.has(e.id)) });
   }
   return <section className="diagram" aria-label={label}>
-    <div className="flow"><ReactFlow nodes={nodes} edges={edges} onNodesChange={changeNodes} onEdgesChange={changeEdges}
+    <div className="flow"><ReactFlow colorMode={theme} nodes={nodes} edges={edges} onNodesChange={changeNodes} onEdgesChange={changeEdges}
       onConnect={connect} nodesDraggable={editing} nodesConnectable={editing} elementsSelectable={editing}
       deleteKeyCode={editing ? ['Backspace', 'Delete'] : null} fitView fitViewOptions={{ padding: 0.25 }}>
       <Background /><Controls showInteractive={false} />

@@ -100,6 +100,25 @@ test('login starts a new chat and saved sessions can be opened and left', async 
   assert.equal(document.querySelector('#workspace'), null);
 });
 
+test('theme, study tabs and mobile navigation preserve the current response', async t => {
+  const {document, window} = await setup(t);
+  const response = (await until(() => document.querySelector('.cm-line'))).textContent;
+  assert.equal(document.documentElement.dataset.theme, 'dark');
+  document.querySelector('[aria-label="Switch to light mode"]').click();
+  await until(() => document.documentElement.dataset.theme === 'light');
+  assert.equal(window.localStorage.getItem('studyroom-theme'), 'light');
+  assert.equal(document.querySelector('.cm-line').textContent, response);
+  document.querySelector('#map-tab').click();
+  await until(() => document.querySelector('#workspace-panel').hidden);
+  assert.equal(document.querySelector('#map-panel').hidden, false);
+  document.querySelector('#map-tab').dispatchEvent(new window.KeyboardEvent('keydown', {key: 'ArrowLeft', bubbles: true}));
+  await until(() => !document.querySelector('#workspace-panel').hidden);
+  document.querySelector('[aria-label="Open chat sessions"]').click();
+  await until(() => document.querySelector('.chat-app').classList.contains('menu-open'));
+  document.querySelector('.sidebar-backdrop').click();
+  await until(() => !document.querySelector('.chat-app').classList.contains('menu-open'));
+});
+
 test('switching chats restores their own conversation and ignores the previous socket', async t => {
   const {document, captureDispatch} = await setup(t);
   const previousSocket = captureDispatch();

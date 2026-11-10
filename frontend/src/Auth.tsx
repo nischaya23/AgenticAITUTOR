@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ThemeToggle } from './Theme';
 
 export type User = { id: number; email: string };
 export const authExpired = 'studyroom-auth-expired';
@@ -78,6 +79,7 @@ export default function Auth({ children }: {
   if (user) return children(user, logout);
   return <main className="auth-shell">
     <section className="auth-card">
+      <ThemeToggle />
       <p className="eyebrow">STUDYROOM</p>
       <h1>{signup ? 'Create your account' : 'Welcome back'}</h1>
       <p className="muted">Save your materials and continue learning where you left off.</p>

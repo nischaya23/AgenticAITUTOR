@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Background, Controls, MarkerType, ReactFlow, type NodeChange } from '@xyflow/react';
 import { LayoutGroup, motion, useReducedMotion } from 'motion/react';
 import type { Graph, Search, Visualization, Visit } from './types';
+import { useTheme } from './Theme';
 import '@xyflow/react/dist/style.css';
 
 const SceneCanvas = lazy(() => import('./SceneCanvas'));
@@ -35,6 +36,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
   graph: Graph; visits?: Visit[]; step?: number; masteryTarget?: number; label: string;
 }) {
   const [moved, setMoved] = useState(new Map<string, { x: number; y: number }>());
+  const { theme } = useTheme();
   const reducedMotion = useReducedMotion();
   const positions = graphPositions(graph, visits);
   const current = visits?.[step];
@@ -52,7 +54,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
   const edges = graph.edges.map((edge, index) => {
     const active = current?.via === edge.source && current.node === edge.target;
     return { ...edge, id: 'edge-' + index, animated: active && !reducedMotion,
-      markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: active ? '#a45a15' : '#687f6c', strokeWidth: active ? 3 : 1.5 } };
+      markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: active ? (theme === 'dark' ? '#d0e9a3' : '#365c37') : '#7d9387', strokeWidth: active ? 3 : 1.5 } };
   });
 
   function moveNodes(changes: NodeChange[]) {
@@ -66,7 +68,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
   }
 
   return <div className="flow" aria-label={label}>
-    <ReactFlow nodes={nodes} edges={edges} onNodesChange={moveNodes} fitView
+    <ReactFlow colorMode={theme} nodes={nodes} edges={edges} onNodesChange={moveNodes} fitView
       fitViewOptions={{ padding: 0.22 }} minZoom={0.12} nodesConnectable={false} deleteKeyCode={null}>
       <Background /><Controls showInteractive={false} />
     </ReactFlow>
@@ -74,6 +76,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
 }
 
 function SearchArray({ data, index }: { data: Search; index: number }) {
+  const { theme } = useTheme();
   const step = data.steps[index];
   const reducedMotion = useReducedMotion();
   const pointers = [['L', step.left], ['M', step.mid], ['R', step.right]] as const;
@@ -88,7 +91,9 @@ function SearchArray({ data, index }: { data: Search; index: number }) {
                 <motion.span layoutId={label} transition={{ duration: reducedMotion ? 0 : 0.28 }} key={label}>{label}</motion.span>)}
             </div>
             <motion.div className="array-cell" animate={{
-              backgroundColor: i === step.mid ? '#f5cc8b' : i >= step.left && i < step.right ? '#cce7d3' : '#f0f3ee',
+              backgroundColor: theme === 'dark'
+                ? (i === step.mid ? '#65512f' : i >= step.left && i < step.right ? '#32482e' : '#202829')
+                : (i === step.mid ? '#f5cc8b' : i >= step.left && i < step.right ? '#cce7d3' : '#f0f3ee'),
               scale: i === step.mid && !reducedMotion ? 1.06 : 1,
             }} transition={{ duration: reducedMotion ? 0 : 0.25 }}>{value ?? 'End'}</motion.div>
             <small>{i}</small>
