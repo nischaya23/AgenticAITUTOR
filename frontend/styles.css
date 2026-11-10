@@ -277,3 +277,12 @@ pre { overflow: auto; max-height: 300px; white-space: pre-wrap; overflow-wrap: a
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+.flow .react-flow__node-default.flow-selectable { cursor: pointer; box-shadow: 0 0 0 1px var(--accent); }
+.flow .react-flow__node-default.flow-selectable:hover { border-color: var(--accent); }
+.flow .react-flow__node-default.flow-locked { opacity: .55; }
+.concept-controls { display: grid; gap: 10px; margin-top: 16px; }
+.concept-controls label { margin: 0; }
+.concept-controls select { font-size: 12px; }
+.web-enhance-option { display: flex !important; gap: 8px; align-items: center; font-size: 11px; margin: 0 !important; }
+.web-enhance-option input { width: auto; }

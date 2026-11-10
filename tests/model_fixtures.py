@@ -37,6 +37,12 @@ async def mock_llm(instructions, data, schema=None, **kwargs):
         return schema(objective='Practice',steps=['Solve independently'],learning_goals=['Understand'])
     if schema is planner.Selection:
         return schema(action='explanation' if data.get('explicit') else 'guiding_question',strategy='One step')
+    from backend import websearch
+    if schema is websearch.TopicMeanings:
+        topic=data['topic']
+        return schema(meanings=[dict(label=topic,query=topic,description=f'The study subject {topic}.')])
+    if schema is websearch.Relevance:
+        return schema(relevant=[p['index'] for p in data['pages'] if 'durag' not in p['title'].lower()])
     if schema is knowledge.ConceptGraph:
         names=[s.strip('# ').strip() for s in data.splitlines() if s.startswith('#')][:15]
         return schema(concepts=names or ['Uploaded material'],prerequisites=[])

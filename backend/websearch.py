@@ -14,8 +14,9 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import httpx
+from pydantic import Field
 
-from . import config, logging_setup as logs
+from . import config, prompts, utils, logging_setup as logs
 
 # Wikimedia requires a descriptive User-Agent with a contact URL or address.
 USER_AGENT = f'StudyroomTutor/1.0 ({config.WEB_SEARCH_CONTACT}) python-httpx'
@@ -204,6 +205,39 @@ async def _gemini_search(query: str) -> list[dict]:
     chunks = candidate.get('groundingMetadata', {}).get('groundingChunks', [])
     links = [dict(title=clean_title(c['web'].get('title', 'Web source')), url=c['web'].get('uri', '')) for c in chunks if c.get('web')]
     return [dict(title=clean_title(f'Web notes - {query}'), url=links[0]['url'] if links else '', text=text[:MAX_DOC_CHARS], links=links)]
+
+
+class Meaning(utils.Schema):
+    label: str = Field(min_length=1, max_length=120)
+    query: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=300)
+
+
+class TopicMeanings(utils.Schema):
+    meanings: list[Meaning] = Field(min_length=1, max_length=4)
+
+
+class Relevance(utils.Schema):
+    relevant: list[int] = Field(max_length=10)
+
+
+async def interpret_topic(topic: str) -> list[Meaning]:
+    """The study meanings of a topic, most likely first; several only when it is ambiguous."""
+    result = await utils.call_llm(prompts.TOPIC_MEANINGS, {'topic': topic}, schema=TopicMeanings,
+                                  operation='TOPIC_MEANINGS', max_output_tokens=600)
+    return result.meanings
+
+
+async def relevant_pages(pages: list[dict], subject: str) -> list[dict]:
+    """Drop pages that are not about the subject, e.g. "Durag" when studying retrieval-augmented generation."""
+    if not pages:
+        return []
+    previews = [dict(index=i, title=page['title'], url=page['url'], start=page['text'][:700]) for i, page in enumerate(pages)]
+    result = await utils.call_llm(prompts.PAGE_RELEVANCE, {'subject': subject, 'pages': previews}, schema=Relevance,
+                                  operation='PAGE_RELEVANCE', max_output_tokens=200)
+    keep = {i for i in result.relevant if 0 <= i < len(pages)}
+    logs.event('websearch.filtered', subject=subject[:200], kept=len(keep), dropped=[p['title'] for i, p in enumerate(pages) if i not in keep])
+    return [page for i, page in enumerate(pages) if i in keep]
 
 
 async def search(query: str, max_pages: int | None = None) -> list[dict]:

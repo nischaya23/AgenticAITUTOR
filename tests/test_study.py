@@ -317,3 +317,54 @@ def test_legacy_material_session_initializes_plan_once(app_env,monkeypatch):
         assert response.json()['state']['plan']['steps']
         assert response.json()['state']['current_problem']['id']==study['state']['current_problem']['id']
     assert mock.await_count==1
+
+
+def prepare_map(client, monkeypatch):
+    """Basics -> Advanced, with Sibling independent; every concept has matching text."""
+    from backend import knowledge
+    async def graph(documents, focus=None):
+        return knowledge.ConceptGraph(concepts=['Basics', 'Advanced', 'Sibling'],
+            prerequisites=[knowledge.Prerequisite(prerequisite='Basics', concept='Advanced')])
+    monkeypatch.setattr(knowledge, 'extract_concepts', graph)
+    text = b'Basics explained. Advanced builds on basics. Sibling is separate.'
+    material = client.post('/api/materials', files={'file': ('map.md', text, 'text/markdown')}).json()
+    sid = client.post('/api/sessions').json()['id']
+    study = client.post(f'/api/sessions/{sid}/study', json={'material_id': material['id']}).json()
+    return sid, material, study
+
+
+def test_student_switches_to_unlocked_concept_and_it_stays_focused(app_env, monkeypatch):
+    client, factory, _ = app_env
+    sid, _, study = prepare_map(client, monkeypatch)
+    available = {n['id']: n['available'] for n in study['graph']['nodes']}
+    assert available == {'Basics': True, 'Advanced': False, 'Sibling': True}
+    other = 'Sibling' if study['state']['current_concept'] == 'Basics' else 'Basics'
+    locked = client.post(f'/api/sessions/{sid}/concept', json={'concept': 'Advanced'})
+    assert locked.status_code == 409 and 'Basics' in locked.json()['detail']
+    assert client.post(f'/api/sessions/{sid}/concept', json={'concept': 'Unknown'}).status_code == 404
+    switched = client.post(f'/api/sessions/{sid}/concept', json={'concept': other})
+    assert switched.status_code == 200, switched.text
+    state = switched.json()['state']
+    assert state['current_concept'] == other and state['focus_concept'] == other
+    skipped = client.post(f'/api/sessions/{sid}/skip', json={'problem_id': state['current_problem']['id']}).json()
+    assert skipped['state']['current_concept'] == other  # The chosen concept stays until mastered.
+    with factory.begin() as db:
+        memory.update_long_term_memory(db, 1, {'mastery': {'Basics': .8}})
+    unlocked = client.post(f'/api/sessions/{sid}/concept', json={'concept': 'Advanced'})
+    assert unlocked.status_code == 200, unlocked.text
+    assert unlocked.json()['state']['current_concept'] == 'Advanced'
+
+
+def test_focus_clears_once_concept_is_mastered():
+    graph = {'concepts': ['Basics', 'Sibling'], 'prerequisites': []}
+    assert main.select_study_concept(graph, {'Basics': .1, 'Sibling': .3}, focus='Sibling') == 'Sibling'
+    assert main.select_study_concept(graph, {'Basics': .1, 'Sibling': .9}, focus='Sibling') == 'Basics'
+
+
+def test_choosing_waits_for_pending_assessment(app_env, monkeypatch):
+    client, factory, _ = app_env
+    sid, _, _ = prepare_map(client, monkeypatch)
+    with factory.begin() as db:
+        memory.update_short_term_memory(db, sid, {'assessment_pending': True})
+    response = client.post(f'/api/sessions/{sid}/concept', json={'concept': 'Sibling'})
+    assert response.status_code == 409 and 'assessed' in response.json()['detail']

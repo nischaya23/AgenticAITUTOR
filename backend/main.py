@@ -6,7 +6,7 @@ from uuid import uuid4
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -307,7 +307,7 @@ async def materials(request: Request):
 
 @app.post('/api/materials')
 async def upload_material(request: Request, file: UploadFile | None = File(None),
-                          files: list[UploadFile] | None = File(None)):
+                          files: list[UploadFile] | None = File(None), web_enhance: bool = Form(False)):
     """Build one concept graph from a single file or from several selected files."""
     uploads = ([file] if file else []) + list(files or [])
     if not uploads:
@@ -329,57 +329,103 @@ async def upload_material(request: Request, file: UploadFile | None = File(None)
             if total > 600000:
                 raise ValueError('Selected materials are too long together; choose fewer or smaller files.')
             documents.append((name, content, text))
-        return await build_material(request.state.user_id, documents)
+        return await build_material(request.state.user_id, documents, {'web_enhance': web_enhance})
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
-async def build_material(user_id: int, documents: list[tuple], extra: dict | None = None) -> dict:
+async def build_material(user_id: int, documents: list[tuple], extra: dict | None = None, focus: str | None = None) -> dict:
     """Extract one concept graph from (name, bytes, text[, url]) documents and save it for the user."""
-    graph = await knowledge.extract_concepts([(document[0], document[2]) for document in documents])
+    graph = await knowledge.extract_concepts([(document[0], document[2]) for document in documents], focus)
     with SessionLocal.begin() as db:
         graph = knowledge.store_graph(db, graph, isolated=True)
     record = await asyncio.to_thread(knowledge.save_materials, documents, graph.model_dump(), extra)
     with SessionLocal.begin() as db:
         db.add(Material(id=record['id'], user_id=user_id))
-    return {'id': record['id'], 'name': record['name'], 'sources': record['sources'],
+    return {'id': record['id'], 'name': record['name'], 'sources': record['sources'], 'web_enhance': record['web_enhance'],
             'web_sources': record.get('web_sources', []), 'concepts': graph.model_dump()}
+
+
+class WebEnhanceRequest(utils.Schema):
+    enabled: bool
+
+
+@app.post('/api/materials/{material_id}/web-enhance')
+async def set_web_enhance(material_id: str, body: WebEnhanceRequest, request: Request):
+    """Turn per-concept web lookups on or off for one of the user's materials."""
+    with SessionLocal() as db:
+        owned = db.get(Material, material_id)
+        if owned is None or owned.user_id != request.state.user_id:
+            raise HTTPException(404, 'Material not found.')
+    record = await asyncio.to_thread(knowledge.update_material, material_id, web_enhance=body.enabled)
+    return {'id': material_id, 'web_enhance': record['web_enhance']}
 
 
 class WebTopicRequest(utils.Schema):
     topic: str = Field(min_length=2, max_length=200)
+    meaning: websearch.Meaning | None = None
 
 
 @app.post('/api/materials/web')
 async def web_material(request: Request, body: WebTopicRequest):
-    """Study a topic without uploads: search the web and build the concept graph from the pages found."""
+    """Study a topic without uploads. An ambiguous topic returns its meanings for the student to pick;
+    otherwise the web is searched, off-topic pages are dropped, and the concept graph is built."""
     topic = ' '.join(body.topic.split())
     try:
-        pages = await websearch.search(topic)
+        meaning = body.meaning
+        if meaning is None:
+            meanings = await websearch.interpret_topic(topic)
+            if len(meanings) > 1:
+                return {'type': 'choices', 'topic': topic, 'meanings': [m.model_dump() for m in meanings]}
+            meaning = meanings[0]
+        subject = f'{meaning.label}: {meaning.description}'
+        pages = await websearch.relevant_pages(await websearch.search(meaning.query), subject)
+        if not pages:
+            raise ValueError(f'No web pages found about {meaning.label}. Try a more specific topic.')
         documents = [(page['title'], page['text'].encode('utf-8'), page['text'], page['url']) for page in pages]
         links = [dict(title=page['title'], url=page['url']) for page in pages if page['url']]
         links += [link for page in pages for link in page.get('links', []) if link['url']]
         return await build_material(request.state.user_id, documents,
-            {'name': f'Web: {topic}', 'origin': 'web', 'topic': topic, 'web_sources': links})
+            {'name': f'Web: {meaning.label}', 'origin': 'web', 'topic': meaning.label, 'topic_description': meaning.description,
+             'web_sources': links, 'web_enhance': True}, focus=subject)
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
+def web_query(material: dict, concept: str) -> str:
+    """Add context so short concept names ("Groups") search for the right subject."""
+    topic = material.get('topic')
+    if topic:
+        return concept if topic.lower() in concept.lower() else f'{concept} {topic}'
+    edges = (material.get('graph') or {}).get('prerequisites', [])
+    related = [e['prerequisite'] for e in edges if e['concept'] == concept] + [e['concept'] for e in edges if e['prerequisite'] == concept]
+    return ' '.join([concept, *related[:2]])
+
+
 async def study_sources(material: dict, concept: str) -> list[dict]:
-    """Material passages for a concept; the agent searches the web once per concept when none match."""
-    sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, material['id'])
-    if sources or not websearch.enabled() or concept in material.get('web_lookups', []):
-        return sources or material['chunks'][:3]
-    query = f"{concept} {material['topic']}" if material.get('topic') and material['topic'].lower() not in concept.lower() else concept
-    try:
-        pages = await websearch.search(query, max_pages=2)
-        added = await asyncio.to_thread(knowledge.add_web_documents, material['id'], pages, concept)
-        logs.event('agent.web_lookup', concept=concept, pages=len(pages), chunks=len(added))
-    except (websearch.WebSearchError, OSError, ValueError) as exc:
-        logs.event('agent.web_lookup_failed', concept=concept, error=type(exc).__name__)
-        return material['chunks'][:3]
-    sources = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 4, material['id'])
-    return sources or added[:3] or material['chunks'][:3]
+    """Passages for a concept. The agent searches the web once per concept when the material has
+    nothing on it, or for every concept when the material has web enhancement turned on."""
+    enhance = material.get('web_enhance', False)
+    hits = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 8, material['id'])
+    added = []
+    if websearch.enabled() and concept not in material.get('web_lookups', []) and (enhance or not hits):
+        try:
+            query = web_query(material, concept)
+            # Uploads have no topic, so related concepts from the map tell the filter which subject is meant.
+            subject = f"{concept} (in {material['topic']}: {material.get('topic_description', '')})" if material.get('topic') \
+                else f'{concept}, studied together with: {query}'
+            pages = await websearch.relevant_pages(await websearch.search(query, max_pages=2), subject)
+            added = await asyncio.to_thread(knowledge.add_web_documents, material['id'], pages, concept)
+            logs.event('agent.web_lookup', concept=concept, pages=len(pages), chunks=len(added))
+            hits = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 8, material['id'])
+        except Exception as exc:  # A failed optional lookup must never block the next question.
+            logs.event('agent.web_lookup_failed', concept=concept, error=type(exc).__name__)
+    if not hits:
+        return added[:3] or material['chunks'][:3]
+    if not enhance:
+        return hits[:4]
+    mixed = [c for c in hits if 'lookup' not in c][:2] + [c for c in hits if 'lookup' in c][:2]
+    return mixed + [c for c in hits if c not in mixed][:4 - len(mixed)]
 
 
 MASTERY_TARGET = .75  # A progression heuristic, not a calibrated probability.
@@ -395,24 +441,32 @@ def study_snapshot(db, session_id: int) -> dict:
     mastery = memory.get_observer_memory(db, row.user_id)['mastery']
     return dict(type='study_state', state=public_state(state), material=material,
         graph={'nodes': [dict(id=name, label=name, mastery=mastery.get(name),
-                              active=name == state.get('current_concept')) for name in graph['concepts']],
+                              active=name == state.get('current_concept'),
+                              available=not missing_prerequisites(graph, mastery, name)) for name in graph['concepts']],
                'edges': [dict(source=e['prerequisite'], target=e['concept'])
                          for e in graph['prerequisites']]},
         mastery_target=MASTERY_TARGET)
 
 
-def select_study_concept(graph: dict, mastery: dict) -> str | None:
+def missing_prerequisites(graph: dict, mastery: dict, name: str) -> list[str]:
+    return [e['prerequisite'] for e in graph['prerequisites']
+            if e['concept'] == name and mastery.get(e['prerequisite'], 0) < MASTERY_TARGET]
+
+
+def select_study_concept(graph: dict, mastery: dict, focus: str | None = None) -> str | None:
+    """The student's chosen concept until it is mastered, otherwise the weakest unlocked one."""
     remaining = [n for n in graph['concepts'] if mastery.get(n, 0) < MASTERY_TARGET]
-    ready = [name for name in remaining if all(
-        mastery.get(e['prerequisite'], 0) >= MASTERY_TARGET
-        for e in graph['prerequisites'] if e['concept'] == name)]
+    if focus in remaining and not missing_prerequisites(graph, mastery, focus):
+        return focus
+    ready = [name for name in remaining if not missing_prerequisites(graph, mastery, name)]
     if remaining and not ready:
         raise ValueError('No eligible concept; inspect the material prerequisite graph.')
     return min(ready, key=lambda name: mastery.get(name, 0)) if ready else None
 
 
-async def advance_study(session_id: int) -> dict | None:
-    """Called under the session job lock; event ingestion stays responsive."""
+async def advance_study(session_id: int, chosen: str | None = None) -> dict | None:
+    """Called under the session job lock; event ingestion stays responsive. `chosen` is a concept the
+    student picked (already checked as unlocked); it stays the focus until mastered."""
     await plans.ensure(session_id, SessionLocal)
     with SessionLocal() as db:
         row = require_session(db, session_id)
@@ -421,12 +475,11 @@ async def advance_study(session_id: int) -> dict | None:
             return study_snapshot(db, session_id)
         material = knowledge.get_material(state['material_id'])
         mastery = memory.get_observer_memory(db, row.user_id)['mastery']
-        concept = select_study_concept(material['graph'], mastery)
+        concept = chosen or select_study_concept(material['graph'], mastery, state.get('focus_concept'))
+        focus = concept if concept in (chosen, state.get('focus_concept')) else None
         revision = state['revision']
         recent = state.get('recent_questions', [])
-        eligible = [name for name in material['graph']['concepts'] if all(
-            mastery.get(e['prerequisite'], 0) >= MASTERY_TARGET
-            for e in material['graph']['prerequisites'] if e['concept'] == name)]
+        eligible = [name for name in material['graph']['concepts'] if not missing_prerequisites(material['graph'], mastery, name)]
     if concept is None:
         with SessionLocal.begin() as db:
             state = memory.get_short_term_memory(db, session_id)
@@ -449,7 +502,7 @@ async def advance_study(session_id: int) -> dict | None:
                        response=Response(diagram=problem.get('starter_diagram') or {}).model_dump(),
                        response_revision=current.get('response_revision', 0)+1, assessment_pending=False,
                        question_generation_error=None, recent_formats=(current.get('recent_formats', [])+[problem.get('format', 'explanation')])[-6:],
-                       observer=temporal, revision=revision+1, study_complete=False,
+                       observer=temporal, revision=revision+1, study_complete=False, focus_concept=focus,
                        recent_questions=(recent+[problem['prompt']])[-6:])
         orchestrator.persist_observation(db, row, current, 'student_action', {'action': 'problem_opened'})
         append_event(db, session_id, 'student_action',
@@ -557,6 +610,36 @@ async def skip_question(session_id: int, request: SkipRequest):
             raise HTTPException(409, 'Your work changed. Try skipping again.')
         with SessionLocal.begin() as db:
             append_event(db, session_id, 'question_skipped', {'problem_id': request.problem_id})
+        await broadcast(session_id, result)
+        return result
+
+
+class ConceptRequest(utils.Schema):
+    concept: str = Field(min_length=1, max_length=200)
+
+
+@app.post('/api/sessions/{session_id}/concept')
+async def choose_concept(session_id: int, request: ConceptRequest):
+    """Switch to a concept from the map once its prerequisites are mastered."""
+    async with LOCKS.setdefault(session_id, asyncio.Lock()):
+        with SessionLocal() as db:
+            row = require_session(db, session_id)
+            state = row.state
+            if state.get('ended') or not state.get('material_id'):
+                raise HTTPException(409, 'No active study session.')
+            if state.get('assessment_pending'):
+                raise HTTPException(409, 'Wait for your current answer to be assessed.')
+            graph = knowledge.get_material(state['material_id'])['graph']
+            if request.concept not in graph['concepts']:
+                raise HTTPException(404, 'That concept is not in this learning map.')
+            missing = missing_prerequisites(graph, memory.get_observer_memory(db, row.user_id)['mastery'], request.concept)
+            if missing:
+                raise HTTPException(409, 'Master the prerequisites first: ' + ', '.join(missing) + '.')
+        result = await advance_study(session_id, chosen=request.concept)
+        if result is None:
+            raise HTTPException(409, 'Your work changed. Try switching again.')
+        with SessionLocal.begin() as db:
+            append_event(db, session_id, 'concept_selected', {'concept': request.concept})
         await broadcast(session_id, result)
         return result
 

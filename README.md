@@ -248,16 +248,32 @@ for a future trained estimator; no GRU or pretrained weights are required.
 
 ## Studying from the web
 
-Instead of uploading files you can type a topic into **Study a topic from the web** and press
-**Search web**. `backend/websearch.py` collects pages for the topic, the concept graph is built from
-them exactly as for uploads, and the material panel links every source page. You can also select up
-to 10 PDF/TXT/MD files at once to build one combined graph.
+The home page accepts up to 10 PDF/TXT/MD files to build one combined graph.
+Topic-based web search remains available through `POST /api/materials/web`.
 
 While you study, if neither uploaded nor web material has a passage for the current concept, the
 question generator searches the web once for that concept, adds the pages to the material, and
 cites them.
 
-Configure in `.env`:
+Web topics go through three checks so look-alike words do not leak in (for example "rag" must not
+produce "Durag"): the model first interprets the topic and, when it has several real study meanings,
+asks you which one you mean; search results are then filtered to pages about that meaning; and
+concept extraction is told the exact subject and ignores anything else. Per-concept agent lookups use
+the same page filter.
+
+To use the web alongside your files, switch on
+**Enhance with web search for every concept** in the learning-map panel. Each concept is then looked
+up once, and questions draw on both your material and the web pages found. Topics studied from the
+web have this on by default.
+
+## Choosing what to study
+
+Click any concept in the learning map whose prerequisites you have mastered (or pick one from
+**Study a concept**) to switch to it. Locked concepts are dimmed and say which prerequisites remain.
+The tutor keeps asking about your chosen concept until you master it, then goes back to picking the
+weakest unlocked concept.
+
+Configure web search in `.env`:
 
 ```dotenv
 WEB_SEARCH_PROVIDER=free   # free: Wikipedia + DuckDuckGo, no key; gemini: Google Search grounding

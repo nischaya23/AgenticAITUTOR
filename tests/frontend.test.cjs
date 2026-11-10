@@ -55,6 +55,13 @@ async function setup(t, { draft, authenticated = true, openSession = true } = {}
       {id: 60, type: 'student_message', data: {content: 'Question from the second chat'}},
     ]})};
     if(options?.method === 'PUT'){ const body=JSON.parse(options.body); requests.push(body); return {ok:true,json:async()=>({type:'plan',plan:body.plan,plan_version:body.expected_version+1})}; }
+    if(url==='/api/materials/web'){const body=JSON.parse(options.body);requests.push({path:url,...body});return body.meaning
+      ?{ok:false,status:400,json:async()=>({detail:'stop after choice'})}
+      :{ok:true,json:async()=>({type:'choices',topic:body.topic,meanings:[
+        {label:'Retrieval-augmented generation',query:'retrieval-augmented generation LLM',description:'Grounding answers in documents.'},
+        {label:'Rag (textile)',query:'rag cloth',description:'A scrap of cloth.'}]})};}
+    if(url.endsWith('/concept')){const body=JSON.parse(options.body);requests.push({path:url,...body});return {ok:true,json:async()=>({...study,state:{...study.state,current_concept:body.concept,current_problem:{id:'p3',prompt:'Question about '+body.concept}}})};}
+    if(url.endsWith('/web-enhance')){const body=JSON.parse(options.body);requests.push({path:url,...body});return {ok:true,json:async()=>({id:'m1',web_enhance:body.enabled})};}
     if(url.endsWith('/next')){requests.push({path:url,...JSON.parse(options.body)});return {ok:true,json:async()=>({...study,state:{...study.state,current_problem:{id:'p2',prompt:'Next question'}}})};}
     return { ok: true, json: async () => url.endsWith('/study') ? study : { history: [] } };
   };
@@ -307,4 +314,34 @@ test('background hypotheses update only the panel and grading activity stays com
   const notification=await until(()=>document.querySelector('.memory-notice'));
   assert.equal(notification.open,false);
   assert.match(notification.textContent,/Saved submission reflection/);
+});
+
+test('concept picker lists only unlocked concepts and web enhancement can be toggled',async t=>{
+  const {document,dispatch,requests,window:w}=await setup(t);
+  dispatch({...study,graph:{nodes:[
+    {id:'Binary Search',label:'Binary Search',active:true,available:true},
+    {id:'Sorting',label:'Sorting',available:true},
+    {id:'Search Trees',label:'Search Trees',available:false}],
+    edges:[{source:'Sorting',target:'Search Trees'}]}});
+  const picker=await until(()=>document.querySelector('#concept-picker'));
+  await until(()=>picker.options.length===2);
+  assert.deepEqual([...picker.options].map(o=>o.value),['','Sorting']);
+  picker.value='Sorting';
+  picker.dispatchEvent(new w.Event('change',{bubbles:true}));
+  await until(()=>document.querySelector('#problem').textContent==='Question about Sorting');
+  assert.deepEqual(requests.find(r=>r.path.endsWith('/concept')),{path:'/api/sessions/1/concept',concept:'Sorting'});
+  const enhance=document.querySelector('#web-enhance');
+  assert.equal(enhance.checked,false);
+  enhance.click();
+  await until(()=>document.querySelector('#web-enhance').checked);
+  assert.deepEqual(requests.find(r=>r.path.endsWith('/web-enhance')),{path:'/api/materials/m1/web-enhance',enabled:true});
+});
+
+test('new chat keeps the upload-only landing page', async t => {
+  const {document} = await setup(t, {openSession: false});
+  assert.equal(document.querySelectorAll('#upload').length, 1);
+  assert.equal(document.querySelector('#upload').multiple, true);
+  assert.equal(document.querySelector('.app-header input[type=file]'), null);
+  assert.equal(document.querySelector('#web-topic'), null);
+  assert.match(document.querySelector('.new-chat-content h1').textContent, /Upload your notes/);
 });

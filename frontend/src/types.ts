@@ -15,7 +15,7 @@ export type HypothesisState = { status: 'analyzing' | 'stale' | 'unavailable' | 
   items: Hypothesis[]; origin?: 'draft' | 'submission'; version?: number; error?: string;
   response_revision?: number; question_id?: string; plan_version?: number };
 export type Graph = {
-  nodes: { id: string; label: string; mastery?: number | null; active?: boolean }[];
+  nodes: { id: string; label: string; mastery?: number | null; active?: boolean; available?: boolean }[];
   edges: { source: string; target: string }[];
 };
 export type Visit = { node: string; via: string | null; explanation: string };
@@ -48,16 +48,17 @@ export type Session = {
     diagram?: Diagram | null; starter_diagram?: Diagram | null };
   plan?: Partial<LearningPlan>; plan_version?: number; plan_suggestion?: PlanSuggestion | null;
   current_concept: string; workspace: string; material_id?: string;
-  study_complete?: boolean; ended: boolean; observer_status: Observer;
+  study_complete?: boolean; ended: boolean; observer_status: Observer; assessment_pending?: boolean; focus_concept?: string | null;
   response?: Response; response_revision?: number; hypothesis_state?: HypothesisState;
   last_assessment?: Assessment; assessment_stages?: { reflection: string; hypotheses: string };
   question_generation_error?: string | null;
 };
 export type Study = {
   type: 'study_state'; state: Session; graph: Graph; mastery_target: number;
-  material: { id: string; name: string; sources?: string[]; origin?: 'upload' | 'web'; topic?: string;
+  material: { id: string; name: string; sources?: string[]; origin?: 'upload' | 'web'; topic?: string; web_enhance?: boolean;
     web_sources?: { title: string; url: string; concept?: string }[]; chunks: { id: string; source?: string; url?: string; text: string }[] };
 };
+export type Meaning = { label: string; query: string; description: string };
 export type Tool = 'hint' | 'explanation' | 'highlight' | 'visualization' | 'guiding_question';
 export type Result = {
   type: Tool; content: string;

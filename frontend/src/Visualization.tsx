@@ -32,8 +32,9 @@ function graphPositions(graph: Graph, visits?: Visit[]) {
   }));
 }
 
-export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
+export function FlowGraph({ graph, visits, step = 0, masteryTarget, label, onSelect }: {
   graph: Graph; visits?: Visit[]; step?: number; masteryTarget?: number; label: string;
+  onSelect?: (concept: string) => void;
 }) {
   const [moved, setMoved] = useState(new Map<string, { x: number; y: number }>());
   const { theme } = useTheme();
@@ -41,15 +42,18 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
   const positions = graphPositions(graph, visits);
   const current = visits?.[step];
   const visited = new Set(visits?.slice(0, step + 1).map(visit => visit.node));
+  const selectable = (node: Graph['nodes'][number]) => Boolean(onSelect && node.available && !node.active);
   const nodes = graph.nodes.map(node => ({
     id: node.id,
     position: moved.get(node.id) ?? positions.get(node.id)!,
     data: { label: <><strong>{node.label}</strong>
       {masteryTarget !== undefined && <small>{node.mastery == null ? 'Not assessed yet'
-        : 'Estimated mastery: ' + Math.round(node.mastery * 100) + '%'}</small>}</> },
-    className: node.active || current?.node === node.id ? 'flow-active'
+        : 'Estimated mastery: ' + Math.round(node.mastery * 100) + '%'}</small>}
+      {onSelect && !node.available && <small>Locked: finish its prerequisites</small>}</> },
+    className: [node.active || current?.node === node.id ? 'flow-active'
       : visited.has(node.id) || (node.mastery ?? -1) >= (masteryTarget ?? 1) ? 'flow-visited' : '',
-    ariaLabel: node.label,
+      selectable(node) ? 'flow-selectable' : '', onSelect && !node.available ? 'flow-locked' : ''].join(' ').trim(),
+    ariaLabel: selectable(node) ? 'Study ' + node.label : node.label,
   }));
   const edges = graph.edges.map((edge, index) => {
     const active = current?.via === edge.source && current.node === edge.target;
@@ -69,6 +73,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label }: {
 
   return <div className="flow" aria-label={label}>
     <ReactFlow colorMode={theme} nodes={nodes} edges={edges} onNodesChange={moveNodes} fitView
+      onNodeClick={(_, clicked) => { const node = graph.nodes.find(n => n.id === clicked.id); if (node && selectable(node)) onSelect!(node.id); }}
       fitViewOptions={{ padding: 0.22 }} minZoom={0.12} nodesConnectable={false} deleteKeyCode={null}>
       <Background /><Controls showInteractive={false} />
     </ReactFlow>
