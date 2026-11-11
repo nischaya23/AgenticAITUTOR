@@ -282,3 +282,21 @@ pre { overflow: auto; max-height: 300px; white-space: pre-wrap; overflow-wrap: a
 .concept-controls select { font-size: 12px; }
 .web-enhance-option { display: flex !important; gap: 8px; align-items: center; font-size: 11px; margin: 0 !important; }
 .web-enhance-option input { width: auto; }
+
+.topic-form { display: grid; gap: 12px; width: 100%; margin: 20px 0; text-align: left; }
+.topic-form textarea, .memory-panel textarea { width: 100%; min-height: 110px; padding: 12px; border-radius: 10px; border: 1px solid var(--border, #718079); color: inherit; background: transparent; font: inherit; box-sizing: border-box; }
+.preparation-panel { width: 100%; text-align: left; margin-top: 20px; }
+.research-timeline { margin: 16px 0; max-width: 100%; overflow-wrap: anywhere; }
+.research-timeline ol { padding-left: 24px; max-height: 360px; overflow: auto; }
+.research-timeline li { padding: 8px 0; }
+.research-timeline p { margin: 4px 0; }
+.research-timeline blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid #718079; font-size: .9em; }
+.research-selected strong { color: #4e8b58; }
+.memory-panel dl { display: grid; gap: 6px; }
+.memory-panel dt { font-weight: 600; }
+.memory-panel dd { margin: 0 0 12px; overflow-wrap: anywhere; }
+.memory-panel li { margin-bottom: 14px; }
+.memory-panel form { display: grid; gap: 8px; margin: 12px 0; }
+.memory-response { white-space: pre-wrap; }
+.video-player video { width: 100%; max-height: 540px; border-radius: 12px; background: #172526; }
+.video-job { border: 1px solid var(--border, #718079); padding: 12px; border-radius: 10px; margin: 12px 0; }

@@ -2,12 +2,7 @@ export type Annotation = {
   line: number; quote: string; reason: string; start: number; end: number;
   category: 'possible_error' | 'important_concept' | 'missing_justification' | 'reconsider' | 'explanation_needed';
 };
-export type Diagram = {
-  nodes: { id: string; label: string; position: { x: number; y: number } }[];
-  edges: { id: string; source: string; target: string }[];
-};
-export type Response = { text: string; diagram: Diagram };
-export type DiagramAnnotation = { target: 'node' | 'edge'; id: string; reason: string };
+export type Response = { text: string };
 export type Hypothesis = { id: string; concept: string; possible_gap: string; confidence: number;
   evidence: { reference: string; summary: string }[]; diagnostic_focus: string;
   status: 'tentative' | 'supported' | 'weakened' | 'resolved' };
@@ -18,53 +13,31 @@ export type Graph = {
   nodes: { id: string; label: string; mastery?: number | null; active?: boolean; available?: boolean }[];
   edges: { source: string; target: string }[];
 };
-export type Visit = { node: string; via: string | null; explanation: string };
-export type SearchStep = {
-  left: number; right: number; mid: number | null;
-  comparison: 'less' | 'equal' | 'greater' | 'complete'; explanation: string;
-};
-export type Search = { kind: 'binary_search'; title: string; array: number[]; target: number; steps: SearchStep[] };
-export type SceneTone = 'neutral' | 'accent' | 'success' | 'warning';
-export type SceneObject = { id: string; x: number; y: number; tone: SceneTone } & (
-  | { kind: 'rect'; width: number; height: number; label: string | null }
-  | { kind: 'circle'; radius: number; label: string | null }
-  | { kind: 'text'; width: number; label: string }
-  | { kind: 'line' | 'arrow'; dx: number; dy: number; label?: string | null }
-);
-export type SceneChange = {
-  id: string; x: number | null; y: number | null; tone: SceneTone | null;
-  label: string | null; visible: boolean | null;
-};
-export type Scene = { kind: 'scene'; title: string; objects: SceneObject[];
-  steps: { explanation: string; changes: SceneChange[] }[] };
-export type Visualization = Search
-  | Scene
-  | (Graph & { kind: 'concept_graph'; title: string })
-  | (Graph & { kind: 'graph_traversal' | 'tree_traversal'; title: string; steps: Visit[] });
-export type Observer = { decision?: string; reason?: string; revision?: number; feedback_intervention_id?: number | null };
+export type Video = { url: string; title: string; duration: number;
+  chapters: { start: number; end: number; text: string }[] };
+export type Observer = { decision?: string; reason?: string; revision?: number; baseline_decision?: string; decision_source?: string; feedback_intervention_id?: number | null };
 export type Session = {
   current_problem: { id?: string; prompt?: string; solved?: boolean;
-    format?: 'explanation' | 'trace' | 'diagram_interpretation' | 'diagram_construction';
-    diagram?: Diagram | null; starter_diagram?: Diagram | null };
+    format?: 'explanation' | 'trace' };
   plan?: Partial<LearningPlan>; plan_version?: number; plan_suggestion?: PlanSuggestion | null;
   current_concept: string; workspace: string; material_id?: string;
-  study_complete?: boolean; ended: boolean; observer_status: Observer; assessment_pending?: boolean; focus_concept?: string | null;
+  proactive_enabled?: boolean; study_complete?: boolean; ended: boolean; observer_status: Observer; assessment_pending?: boolean; focus_concept?: string | null;
   response?: Response; response_revision?: number; hypothesis_state?: HypothesisState;
   last_assessment?: Assessment; assessment_stages?: { reflection: string; hypotheses: string };
-  question_generation_error?: string | null;
+  question_generation_error?: string | null; pending_video?: string | null; last_video_operation?: string;
 };
 export type Study = {
   type: 'study_state'; state: Session; graph: Graph; mastery_target: number;
-  material: { id: string; name: string; sources?: string[]; origin?: 'upload' | 'web'; topic?: string; web_enhance?: boolean;
-    web_sources?: { title: string; url: string; concept?: string }[]; chunks: { id: string; source?: string; url?: string; text: string }[] };
+  material: { id: string; name: string; sources?: string[]; origin?: 'upload' | 'web' | 'topic'; topic?: string; web_enhance?: boolean;
+    graph_sources?: {id: string; title: string; url?: string}[]; graph?: {evidence?: {concept: string; prerequisite: string; source_id: string; quote: string}[]}; web_sources?: { title: string; url: string; concept?: string }[]; chunks: { id: string; source?: string; url?: string; text: string }[] };
 };
 export type Meaning = { label: string; query: string; description: string };
-export type Tool = 'hint' | 'explanation' | 'highlight' | 'visualization' | 'guiding_question';
+export type Tool = 'hint' | 'explanation' | 'highlight' | 'visualization' | 'guiding_question' | 'web_search';
 export type Result = {
   type: Tool; content: string;
   metadata: Partial<Graph> & {
-    annotations?: Annotation[]; visualization?: Visualization; steps?: string[];
-    diagram_annotations?: DiagramAnnotation[];
+    annotations?: Annotation[]; video?: Video; steps?: string[];
+    retrieved_sources?: {id: string; source: string; url?: string}[];
     target?: 'workspace' | 'material'; source_id?: string; quote?: string; start?: number; end?: number;
   };
 };
@@ -77,3 +50,14 @@ export type HistoryItem =
 export type LearningPlan = { objective: string; steps: string[]; learning_goals: string[] };
 export type PlanSuggestion = { id: string; plan: LearningPlan; reason: string; base_version: number };
 export type PlanState = { type: 'plan'; plan: Partial<LearningPlan>; plan_version: number; plan_suggestion?: PlanSuggestion | null };
+
+export type ProgressEvent = { id?: number; kind: string; message?: string; title?: string; url?: string;
+  query?: string; reason?: string; quote?: string; timestamp?: string };
+export type Operation = { kind?: string; content?: string; id: string; status: string; error?: string; events: ProgressEvent[];
+  result?: { id?: string; type?: string; discarded?: boolean; url?: string; meanings?: Meaning[] } };
+export type MemoryItem = { id: string; kind: string; original_text: string; effective_text: string;
+  concept?: string; source_event_id?: number; updated_at?: string; disputed: boolean; student_note: string;
+  edits: {at: string; action: string; before: string; text: string}[] };
+export type MemorySnapshot = { revision: number; short_term: { concept?: string; question?: string; response: Response;
+  plan: Partial<LearningPlan>; assessment?: Assessment; hypotheses?: HypothesisState; assessment_pending: boolean };
+  long_term: {mastery: Record<string,number>; hypotheses: Hypothesis[]}; items: MemoryItem[] };

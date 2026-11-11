@@ -6,14 +6,15 @@ import Auth, { authExpired, type User } from './Auth';
 import Icon from './Icon';
 import { ThemeProvider, ThemeToggle } from './Theme';
 import LearningPlanPanel from './LearningPlan';
-import DiagramView, { emptyDiagram } from './Diagram';
 import Hypotheses from './Hypotheses';
 import Workspace, { annotationRange } from './Workspace';
-import VisualPlayer, { FlowGraph } from './Visualization';
-import type { Annotation, Assessment, Diagram, DiagramAnnotation, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool } from './types';
+import { FlowGraph } from './Visualization';
+import MemoryPanel from './Memory';
+import { PreparationPanel, ResearchTimeline, VideoPlayer, VideoJob } from './Progress';
+import type { Annotation, Assessment, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool, ProgressEvent } from './types';
 import '../styles.css';
 
-const tools: Tool[] = ['hint', 'explanation', 'highlight', 'visualization', 'guiding_question'];
+const tools: Tool[] = ['hint', 'explanation', 'highlight', 'visualization', 'guiding_question', 'web_search'];
 const label = (name: string) => name.replaceAll('_', ' ');
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -38,16 +39,19 @@ type Message = Study | PlanState | {
   | ({ type: 'observer_status' } & Observer)
   | { type: 'busy'; active: boolean }
   | { type: 'session_summary'; result: { summary: string; next_goal: string } }
+  | { type: 'memory_changed' }
+  | ({ type: 'research_progress' } & ProgressEvent)
+  | { type: 'video_pending'; operation_id: string; title: string }
   | { type: 'error'; message: string };
 
 function Intervention({ result }: { result: Result }) {
   const { metadata } = result;
   return <>
     <strong>{label(result.type)}</strong><p>{result.content}</p>
-    {metadata.visualization && <VisualPlayer data={metadata.visualization} />}
-    {!metadata.visualization && metadata.nodes && metadata.edges &&
-      <><FlowGraph graph={{ nodes: metadata.nodes, edges: metadata.edges }} label="Teaching visualization" />
-        <ol>{metadata.steps?.map((step, index) => <li key={index}>{step}</li>)}</ol></>}
+    {metadata.video && <VideoPlayer video={metadata.video} />}
+    {!metadata.video && (metadata.nodes || 'visualization' in metadata) && <p className="muted">Earlier animation archived. Request a new video to see this topic.</p>}
+    {metadata.retrieved_sources?.length ? <details><summary>Sources consulted</summary><ul>{metadata.retrieved_sources.map(source =>
+      <li key={source.id}>{source.url ? <a href={source.url} target="_blank" rel="noopener noreferrer">{source.source}</a> : source.source}</li>)}</ul></details> : null}
   </>;
 }
 
@@ -66,19 +70,16 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const [connected, setConnected] = useState(false);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [diagramValue, setDiagramValue] = useState<Diagram>(emptyDiagram);
-  const [diagramAnnotations, setDiagramAnnotations] = useState<DiagramAnnotation[]>([]);
   const [chat, setChat] = useState('');
   const [assessment, setAssessment] = useState('');
   const [memoryActivity, setMemoryActivity] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [summary, setSummary] = useState('');
-  const [studyTab, setStudyTab] = useState<'workspace' | 'map'>('workspace');
+  const [studyTab, setStudyTab] = useState<'workspace' | 'map' | 'memory'>('workspace');
   const ws = useRef<WebSocket | null>(null);
   const current = useRef<Study | null>(null);
   const workspace = useRef('');
-  const diagram = useRef<Diagram>(emptyDiagram());
   const sent = useRef('');
   const revision = useRef(0);
   const responseRevision = useRef(0);
@@ -101,7 +102,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   }
 
   function responseValue(): StudentResponse {
-    return { text: workspace.current, diagram: diagram.current };
+    return { text: workspace.current };
   }
 
   function markDraft(status: 'stale' | 'analyzing' = 'stale') {
@@ -132,8 +133,9 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
 
   function applyStudy(view: Study, sessionId = sid) {
     const previous = current.current;
-    const serverResponse = view.state.response ?? { text: view.state.workspace,
-      diagram: view.state.current_problem.starter_diagram ?? emptyDiagram() };
+    if(previous?.material.id !== view.material.id){setResearchEvents([]);setVideoJobs([]);}
+    if(view.state.last_video_operation) setVideoJobs(items => items.some(item=>item.id===view.state.last_video_operation) ? items : [...items,{id:view.state.last_video_operation!,title:'Learning animation'}]);
+    const serverResponse = { text: view.state.response?.text ?? view.state.workspace };
     if(previous?.material.id === view.material.id && (previous.state.plan_version ?? 0) > (view.state.plan_version ?? 0)){
       view = { ...view, state: { ...view.state, plan: previous.state.plan, plan_version: previous.state.plan_version, plan_suggestion: previous.state.plan_suggestion } };
     }
@@ -148,14 +150,10 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       let restored = saved;
       try {
         const local = JSON.parse(localStorage.getItem(draftPrefix + sessionId) ?? 'null');
-        if (local?.questionId === view.state.current_problem.id && typeof local.response?.text === 'string'
-          && Array.isArray(local.response?.diagram?.nodes) && Array.isArray(local.response?.diagram?.edges)) restored = local.response;
+        if (local?.questionId === view.state.current_problem.id && typeof local.response?.text === 'string') restored = {text: local.response.text};
       } catch { /* A malformed local draft cannot replace the server copy. */ }
       workspace.current = restored.text.replace(/\r\n?/g, '\n');
-      diagram.current = restored.diagram;
-      setDiagramValue(restored.diagram);
       view = { ...view, state: { ...view.state, response: restored, workspace: restored.text } };
-      setDiagramAnnotations([]);
       setAnnotations([]);
     }
     if (JSON.stringify(responseValue()) !== JSON.stringify(serverResponse) && view.state.hypothesis_state) {
@@ -175,6 +173,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   }
 
   function applyPlan(value: PlanState) {
+    setMemoryVersion(version => version + 1);
     const active = current.current;
     if (!active || value.plan_version < (active.state.plan_version ?? 0)) return;
     const next = { ...active, state: { ...active.state, plan: value.plan, plan_version: value.plan_version, plan_suggestion: value.plan_suggestion,
@@ -185,6 +184,9 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
 
   function onMessage(message: Message) {
     switch (message.type) {
+      case 'memory_changed': setMemoryVersion(value => value + 1); break;
+      case 'research_progress': setResearchEvents(items => [...items.slice(-99), message]); break;
+      case 'video_pending': setVideoJobs(items => [...items, {id: message.operation_id, title: message.title}]); break;
       case 'memory_activity': setMemoryActivity(message.items.map(item => item.message).join(' ')); break;
       case 'plan': applyPlan(message); break;
       case 'hypotheses':
@@ -202,6 +204,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         setObserver(message);
         break;
       case 'ack':
+        setMemoryVersion(value => value + 1);
         revision.current = Math.max(revision.current, message.revision);
         responseRevision.current = Math.max(responseRevision.current, message.response_revision ?? 0);
         if (message.action === 'edit') {
@@ -221,8 +224,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           setStudyTab('workspace');
           const items = result.metadata.annotations ?? [];
           setAnnotations(items.every(item => annotationRange(workspace.current, item)) ? items : []);
-          setDiagramAnnotations((result.metadata.diagram_annotations ?? []).filter(item =>
-            diagram.current[item.target === 'node' ? 'nodes' : 'edges'].some(element => element.id === item.id)));
         }
         appendHistory({ id: message.event_id, type: 'intervention',
           data: { ...result, proactive: message.proactive } });
@@ -283,7 +284,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           const view = await restore();
           if (stopped || ws.current !== socket || socket.readyState !== WebSocket.OPEN) return;
           applyStudy(view);
-          if (opened) sent.current = JSON.stringify(view.state.response ?? { text: view.state.workspace, diagram: emptyDiagram() });
+          if (opened) sent.current = JSON.stringify(view.state.response ?? { text: view.state.workspace });
           opened = true;
           flushEdits();
           setConnected(true);
@@ -319,30 +320,34 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     };
   }, [sid, uploading]);
 
-  async function upload(files: File[]) {
-    const form = new FormData();
-    for (const file of files) form.append('files', file);
-    setUploading(true);
-    onUploadChange(true);
-    setConnected(false);
-    setNotice('');
+  const [topic, setTopic] = useState('');
+  const [preparation, setPreparation] = useState<string | null>(() => !initialSession ? sessionStorage.getItem('studyroom-job-' + user.id) : null);
+  const [researchEvents, setResearchEvents] = useState<ProgressEvent[]>([]);
+  const [videoJobs, setVideoJobs] = useState<{id: string; title: string}[]>([]);
+  const [memoryVersion, setMemoryVersion] = useState(0);
+
+  async function startPreparation(files?: File[]) {
+    setUploading(true); onUploadChange(true); setNotice('');
     try {
-      const material = await api<{ id: string }>('/api/materials', { method: 'POST', body: form });
+      let job: {id: string};
+      if (files) {
+        const form = new FormData(); files.forEach(file => form.append('files', file));
+        job = await api('/api/material-jobs', {method: 'POST', body: form});
+      } else job = await post('/api/material-jobs/topic', {description: topic.trim()});
+      sessionStorage.setItem('studyroom-job-' + user.id, job.id); setPreparation(job.id);
+    } catch (error) { setNotice((error as Error).message); setUploading(false); onUploadChange(false); }
+  }
+
+  async function openPrepared(materialId: string) {
+    setUploading(true); onUploadChange(true);
+    try {
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
-      const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: material.id });
-      setHistory([]);
-      setChat(''); setSummary(''); setAssessment(''); setMemoryActivity('');
-      revision.current = 0;
-      applyStudy(next, session.id);
-      setSid(session.id);
-      onCreated(session.id);
-    } catch (error) {
-      setNotice((error as Error).message);
-    } finally {
-      setUploading(false);
-      onUploadChange(false);
-      onSessionsChange();
-    }
+      const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: materialId });
+      setHistory([]); setChat(''); setSummary(''); setAssessment(''); setMemoryActivity('');
+      revision.current = 0; applyStudy(next, session.id); setSid(session.id); onCreated(session.id);
+      setPreparation(null); sessionStorage.removeItem('studyroom-job-' + user.id);
+    } catch (error) { setNotice((error as Error).message); }
+    finally { setUploading(false); onUploadChange(false); onSessionsChange(); }
   }
 
   function ask(content: string) {
@@ -360,7 +365,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   function submit(event: FormEvent) {
     event.preventDefault();
     const response = responseValue();
-    if ((!response.text.trim() && !response.diagram.nodes.length) || disabled || !flushEdits()) return;
+    if (!response.text.trim() || disabled || !flushEdits()) return;
     if (send({ type: 'problem_attempt', response, problem_id: problem?.id })) {
       setPending(true); markDraft('analyzing');
     }
@@ -422,28 +427,36 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     <main className={study ? 'study-layout' : 'new-chat'}>
       {!study ? <section className="new-chat-content">
         <span className="hero-symbol"><Icon name="book" /></span>
-        <h1>{sid ? 'Opening your chat…' : 'Upload your notes'}</h1>
+        <h1>{sid ? 'Opening your chat…' : 'What would you like to learn?'}</h1>
         {!sid && <>
+          <form className="topic-form" onSubmit={event => {event.preventDefault(); void startPreparation();}}>
+            <label htmlFor="topic-description">Describe your topic and learning goals</label>
+            <textarea id="topic-description" rows={4} maxLength={10000} value={topic} onChange={event => setTopic(event.target.value)}
+              disabled={uploading} placeholder="For example: Teach me binary search from the beginning, especially boundary conditions." />
+            <button disabled={uploading || topic.trim().length < 2}>Build my learning map</button>
+          </form>
+          <p className="muted">Or start from your own notes</p>
           <label className="upload upload-card">
             <Icon name="upload" /><span>{uploading ? 'Preparing your session…' : 'Choose files'}</span>
             <input id="upload" type="file" accept=".pdf,.txt,.md" multiple disabled={uploading}
               onChange={event => {
                 const files = Array.from(event.target.files ?? []);
                 event.target.value = '';
-                if (files.length) void upload(files);
+                if (files.length) void startPreparation(files);
               }} />
           </label>
           <p className="muted">PDF, Markdown, or text</p>
         </>}
+        {preparation && <PreparationPanel id={preparation} onReady={openPrepared} onWaiting={()=>{setUploading(false);onUploadChange(false);}} />}
       </section> : <>
       <div className="study-dock">
         <div className="dock-tabs" role="tablist" aria-label="Study tools" onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           event.preventDefault();
-          const next = event.key === 'Home' ? 'workspace' : event.key === 'End' ? 'map'
-            : studyTab === 'workspace' ? 'map' : 'workspace';
-          setStudyTab(next);
-          document.getElementById(next === 'workspace' ? 'workspace-tab' : 'map-tab')?.focus();
+          const tabs = ['workspace','map','memory'] as const;
+          const index = tabs.indexOf(studyTab);
+          const next = tabs[event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (index + (event.key === 'ArrowRight' ? 1 : 2)) % 3];
+          setStudyTab(next); document.getElementById(next + '-tab')?.focus();
         }}>
           <button id="workspace-tab" role="tab" aria-selected={studyTab === 'workspace'} aria-controls="workspace-panel"
             tabIndex={studyTab === 'workspace' ? 0 : -1}
@@ -451,6 +464,8 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           <button id="map-tab" role="tab" aria-selected={studyTab === 'map'} aria-controls="map-panel"
             tabIndex={studyTab === 'map' ? 0 : -1}
             onClick={() => setStudyTab('map')}>Learning map</button>
+          <button id="memory-tab" role="tab" aria-selected={studyTab === 'memory'} aria-controls="memory-panel"
+            tabIndex={studyTab === 'memory' ? 0 : -1} onClick={() => setStudyTab('memory')}>Memory</button>
         </div>
       <section id="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab" hidden={studyTab !== 'workspace'} className="panel question-panel">
         <p className="eyebrow">CURRENT TOPIC</p>
@@ -460,14 +475,19 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         <p className="muted">An estimate from your answers.</p>
         <p id="problem" className="problem">{study?.state.study_complete ? 'Every concept has reached the current progression target.'
           : problem?.prompt ?? 'Your first question will appear here.'}</p>
+        <label className="web-enhance-option"><input type="checkbox" checked={study.state.proactive_enabled !== false}
+          disabled={!connected || inactive} onChange={event=>{
+            const enabled=event.target.checked;
+            if(send({type:'preferences',proactive_enabled:enabled})) applyStudy({...study,state:{...study.state,proactive_enabled:enabled}});
+          }} />Offer automatic help</label>
         <details className="observer-panel"><summary>Tutor activity</summary>
           <div id="observer-status" role="status">{observer.reason ?? 'Waiting for activity'}</div>
-          <pre>{JSON.stringify(observer, null, 2)}</pre></details>
+          {observer.baseline_decision && <p>Numerical recommendation: {observer.baseline_decision} · Final decision: {observer.decision} · {label(observer.decision_source ?? 'baseline')}</p>}
+          <details><summary>Activity details</summary><pre>{JSON.stringify(observer, null, 2)}</pre></details></details>
         {sid && study && <details className="plan-details"><summary>Your learning plan</summary><LearningPlanPanel key={sid + ':' + study.material.id} sessionId={sid}
           value={{ type: 'plan', plan: study.state.plan ?? {}, plan_version: study.state.plan_version ?? 0, plan_suggestion: study.state.plan_suggestion }}
           disabled={!connected || uploading || study.state.ended} onChange={value => { if(current.current?.material.id === study.material.id) applyPlan(value); }} /></details>}
         {problem?.format && <p className="eyebrow">{label(problem.format)}</p>}
-        {problem?.diagram && <DiagramView value={problem.diagram} label="Question diagram" />}
         <h3>Your response</h3>
         <section className="response-workspace" aria-label="Your response">
         <Workspace key={problem?.id ?? 'empty'} initial={workspace.current} disabled={uploading || !problem?.id || inactive}
@@ -480,24 +500,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
             setAnnotations([]);
             saveDraft();
           }} />
-        <details open={Boolean(diagramValue.nodes.length || problem?.format === 'diagram_construction')}>
-          <summary>Optional node-and-arrow diagram</summary>
-          <DiagramView value={diagramValue} disabled={uploading || !problem?.id || inactive} annotations={diagramAnnotations}
-            onChange={value => {
-              const previous = diagram.current;
-              setDiagramAnnotations(items => items.filter(item => {
-                const before = previous[item.target === 'node' ? 'nodes' : 'edges'].find(element => element.id === item.id);
-                const after = value[item.target === 'node' ? 'nodes' : 'edges'].find(element => element.id === item.id);
-                if (!before || !after || JSON.stringify(before) !== JSON.stringify(after)) return false;
-                if (item.target === 'edge') {
-                  const edge = previous.edges.find(element => element.id === item.id)!;
-                  return [edge.source, edge.target].every(id => previous.nodes.find(node => node.id === id)?.label === value.nodes.find(node => node.id === id)?.label);
-                }
-                return true;
-              }));
-              diagram.current = value; setDiagramValue(value); saveDraft();
-            }} />
-        </details>
         <form onSubmit={submit} id="answer-form">
           <button id="submit" disabled={disabled || Boolean(problem?.solved)}>Submit response</button>
         </form>
@@ -545,7 +547,14 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
               rel="noopener noreferrer">{link.title}</a>{link.concept ? ' (looked up for ' + link.concept + ')' : ''}</li>)}</ul>
             : (study.material.sources?.length ?? 0) > 1 && <ul id="material-sources" className="muted">
             {study.material.sources!.map(source => <li key={source}>{source}</li>)}</ul>}
-          <pre>{study.material.chunks[0]?.text}</pre></details>}
+          <details><summary>Graph evidence</summary><ul>{study.material.graph?.evidence?.map((e,index) => {
+            const source=study.material.graph_sources?.find(item=>item.id===e.source_id);
+            return <li key={index}><strong>{e.prerequisite ? e.prerequisite + ' → ' : ''}{e.concept}</strong>
+              <blockquote>{e.quote}</blockquote>{source?.url ? <a href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a> : source?.title}</li>;
+          })}</ul></details><pre>{study.material.chunks[0]?.text}</pre></details>}
+      </section>
+      <section id="memory-panel" role="tabpanel" aria-labelledby="memory-tab" hidden={studyTab !== 'memory'} className="panel memory-panel">
+        {sid && <MemoryPanel sessionId={sid} active={studyTab === 'memory'} version={memoryVersion} />}
       </section>
       </div>
         <section className="panel chat chat-panel" aria-label="Tutor chat">
@@ -570,6 +579,8 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
                     }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
               </article>)}
           </div>
+          {researchEvents.length > 0 && <ResearchTimeline events={researchEvents} />}
+          {videoJobs.map(job => <VideoJob key={job.id} id={job.id} title={job.title} />)}
           {busy && <p id="busy" role="status">Your tutor is working…</p>}
           <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(chat); }}>
             <label className="sr-only" htmlFor="chat">Ask your tutor</label>

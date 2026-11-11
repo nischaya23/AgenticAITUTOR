@@ -62,6 +62,7 @@ def observe(state: dict, kind: str, data: dict, mastery: float, policy: dict,
             o.update(last_progress_at=t, failure_streak=0)
         else:
             o['failure_streak'] = o.get('failure_streak', 0) + 1
+            o['last_failure_at'] = t
     if kind in ('problem_attempt', 'student_message', 'code_execution') or data.get('action') in ('edit', 'revert'):
         o['last_action_at'] = t
     if data.get('action') in ('edit', 'revert'):

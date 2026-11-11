@@ -322,7 +322,7 @@ def test_legacy_material_session_initializes_plan_once(app_env,monkeypatch):
 def prepare_map(client, monkeypatch):
     """Basics -> Advanced, with Sibling independent; every concept has matching text."""
     from backend import knowledge
-    async def graph(documents, focus=None):
+    async def graph(documents, focus=None, context=None, **kwargs):
         return knowledge.ConceptGraph(concepts=['Basics', 'Advanced', 'Sibling'],
             prerequisites=[knowledge.Prerequisite(prerequisite='Basics', concept='Advanced')])
     monkeypatch.setattr(knowledge, 'extract_concepts', graph)

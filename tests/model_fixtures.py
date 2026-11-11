@@ -19,33 +19,39 @@ def tool_arguments(kind: str, context: dict) -> dict:
                     issues=[dict(line=line, quote=quote, category='reconsider',
                                  reason='Try stating how this step preserves the search interval invariant.')])
     if kind == 'visualization':
-        trace = [
-            (0, 5, 2, 'equal', 'Index 2 matches. Keep looking to the left.'),
-            (0, 2, 1, 'equal', 'Index 1 matches. Move right to 1.'),
-            (0, 1, 0, 'less', 'Index 0 is below the target. Move left to 1.'),
-            (1, 1, None, 'complete', 'The first match is at index 1.'),
-        ]
-        args['visualization'] = dict(kind='binary_search', title='Finding the first occurrence',
-            array=[1, 2, 2, 2, 5], target=2,
-            steps=[dict(left=l, right=r, mid=m, comparison=c, explanation=e) for l, r, m, c, e in trace])
+        args.update(title='Finding the first match',duration=2,
+            code="def draw_frame(canvas, t):\n    canvas.text(40, 40, 'Find the first match')\n    canvas.circle(100 + t * 30, 220, 20)",
+            chapters=[dict(start=0,end=2,text='Keep looking for an earlier match.')],source_ids=[])
     return args
 
 
 
 async def mock_llm(instructions, data, schema=None, **kwargs):
+    from backend import websearch, observer_review
+    if kwargs.get('operation')=='RESEARCH_TOOL':
+        choice=kwargs.get('tool_choice')
+        required=isinstance(choice,dict) and choice.get('name')=='web_search'
+        name='web_search' if required else 'finish_research'
+        args=dict(query=data.get('suggested_query','Study topic'),subject=data.get('subject','Study topic') if isinstance(data.get('subject'),str) else 'Study topic',purpose='Ground the learning graph.') if required else dict(reason='Local sources suffice.')
+        return SimpleNamespace(output=[SimpleNamespace(type='function_call',call_id='call-fixture',name=name,arguments=__import__('json').dumps(args))])
+    if schema is observer_review.Decision:
+        return schema(action='WAIT',reason='Continue working independently.',evidence_references=[])
     if schema is planner.Plan:
         return schema(objective='Practice',steps=['Solve independently'],learning_goals=['Understand'])
     if schema is planner.Selection:
         return schema(action='explanation' if data.get('explicit') else 'guiding_question',strategy='One step')
-    from backend import websearch
+    from backend import websearch, observer_review
     if schema is websearch.TopicMeanings:
         topic=data['topic']
         return schema(meanings=[dict(label=topic,query=topic,description=f'The study subject {topic}.')])
     if schema is websearch.Relevance:
         return schema(relevant=[p['index'] for p in data['pages'] if 'durag' not in p['title'].lower()])
     if schema is knowledge.ConceptGraph:
-        names=[s.strip('# ').strip() for s in data.splitlines() if s.startswith('#')][:15]
-        return schema(concepts=names or ['Uploaded material'],prerequisites=[])
+        documents=data['documents']
+        names=[line.strip('# ').strip() for d in documents for line in d['text'].splitlines() if line.startswith('#')][:15]
+        names=names or ['Uploaded material']
+        return schema(concepts=names,prerequisites=[],evidence=[dict(concept=name,prerequisite='',
+            source_id=documents[0]['id'],quote=documents[0]['text'][:80]) for name in names])
     if schema is tools.Problem:
         n=len(data.get('recent_questions',[]))
         return schema(prompt=f'Question {n}: find the first occurrence of 2.',concept=data['concept'],expected_answer='1',rubric='First index is 1.')

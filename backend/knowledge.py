@@ -15,9 +15,21 @@ class Prerequisite(utils.Schema):
     prerequisite: str
     concept: str
 
+class GraphEvidence(utils.Schema):
+    concept: str
+    prerequisite: str = ''
+    source_id: str
+    quote: str = Field(min_length=1, max_length=500)
+
 class ConceptGraph(utils.Schema):
     concepts: list[str] = Field(max_length=30)
     prerequisites: list[Prerequisite] = Field(max_length=60)
+    evidence: list[GraphEvidence] = Field(default_factory=list, max_length=90)
+
+class GeminiGraph(utils.Schema):
+    """Shallow provider transport; validate the complete graph locally."""
+    graph_json: str
+
 
 def tokens(text: str) -> list[str]:
     return re.findall('[a-z0-9_]+', text.lower())
@@ -147,14 +159,34 @@ def extraction_input(documents: list[tuple[str, str]]) -> str:
     sections = (f'### Document {i}: {name}\n{text[:share]}' for i, (name, text) in enumerate(documents, 1))
     return '\n\n'.join(sections)
 
-async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=None) -> ConceptGraph:
-    """`focus` names the study subject (web topics) so off-topic pages contribute no concepts."""
-    instructions = prompts.EXTRACT_CONCEPTS if len(documents) == 1 else prompts.EXTRACT_CONCEPTS_MULTI
-    text = extraction_input(documents)
-    if focus:
-        instructions += prompts.EXTRACT_FOCUS
-        text = f'Study subject: {focus}\n\n{text}'
-    return await utils.call_llm(instructions, text, schema=ConceptGraph, operation='EXTRACT_CONCEPTS')
+async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=None, context: dict | None=None, primary_count: int | None=None) -> ConceptGraph:
+    instructions = prompts.EXTRACT_CONCEPTS_MULTI + (
+        ' Build the graph around the requested subject. Fill missing prerequisites without broadening the subject. '
+        'For EVERY concept and prerequisite edge supply evidence: concept, prerequisite (empty for concept evidence), '
+        'source_id and exact short quote from the supplied document. Student goals guide scope, never factual correctness.')
+    from .context import bound
+    primary_count = len(documents) if primary_count is None else primary_count
+    def budget(index):
+        if not primary_count or primary_count==len(documents): return EXTRACTION_BUDGET//max(1,len(documents))
+        return 16000//primary_count if index<primary_count else 8000//max(1,len(documents)-primary_count)
+    docs = [dict(id=f'D{i+1}', name=name, text=text[:budget(i)]) for i, (name,text) in enumerate(documents)]
+    gemini=config.LLM_PROVIDER=='gemini'
+    if gemini:
+        instructions += (' Transport: return graph_json containing the complete graph as a JSON string, '
+            'without Markdown fences. Its decoded object must follow this schema: '+json.dumps(ConceptGraph.model_json_schema()))
+    result = await utils.call_llm(instructions, bound(dict(subject=focus or '', documents=docs,
+        learning_context=context or {})), schema=GeminiGraph if gemini else ConceptGraph,
+        operation='EXTRACT_CONCEPTS',max_output_tokens=max(config.MAX_OUTPUT_TOKENS,6000))
+    graph=ConceptGraph.model_validate_json(result.graph_json) if gemini else result
+    lookup = {d['id']:d['text'] for d in docs}
+    for e in graph.evidence:
+        if e.source_id not in lookup or e.quote not in lookup[e.source_id] or e.concept not in graph.concepts:
+            raise ValueError('Graph evidence must reference an exact supplied source passage.')
+    covered = {(e.prerequisite,e.concept) for e in graph.evidence}
+    if any(('', name) not in covered for name in graph.concepts) or any(
+        (e.prerequisite,e.concept) not in covered for e in graph.prerequisites):
+        raise ValueError('The model omitted evidence for a graph concept or prerequisite. Please retry.')
+    return graph
 
 def store_graph(db, graph: ConceptGraph, isolated: bool = False):
     names = list(dict.fromkeys((n.strip()[:200] for n in graph.concepts if n.strip())))
@@ -188,7 +220,7 @@ def store_graph(db, graph: ConceptGraph, isolated: bool = False):
                 stored_edges.add((a, b))
             edges.add((a, b))
             accepted.append(edge)
-    return ConceptGraph(concepts=names, prerequisites=accepted)
+    return ConceptGraph(concepts=names, prerequisites=accepted, evidence=[e for e in graph.evidence if not e.prerequisite or any(x.concept == e.concept and x.prerequisite == e.prerequisite for x in accepted)])
 
 def get_prerequisites(db, concept: str, material_id: str | None=None, user_id: int | None=None) -> list[str]:
     if material_id:

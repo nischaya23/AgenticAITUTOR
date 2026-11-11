@@ -85,7 +85,7 @@ def test_agent_searches_web_once_when_material_lacks_concept(app_env, monkeypatc
     record = knowledge.save_materials([('queues.md', b'# Queues\nFIFO order.', '# Queues\nFIFO order.')],
                                       {'concepts': ['Queues', 'Tree rotations'], 'prerequisites': []})
     sources = asyncio.run(main.study_sources(knowledge.get_material(record['id']), 'Tree rotations'))
-    assert calls == [('Tree rotations', 2)]
+    assert calls == [('Tree rotations', 4)]
     assert sources and all(s['url'] == 'https://example.org/bst' for s in sources)
     updated = knowledge.get_material(record['id'])
     assert updated['web_lookups'] == ['Tree rotations']
@@ -120,7 +120,7 @@ def test_web_enhancement_mixes_material_and_web_passages(app_env, monkeypatch):
     material = knowledge.get_material(body['id'])
     sources = asyncio.run(main.study_sources(material, 'Binary search tree'))
     assert len(calls) == 1
-    assert any('lookup' not in s for s in sources) and any(s.get('lookup') == 'Binary search tree' for s in sources)
+    assert any(not s.get('url') for s in sources) and any(s.get('url') for s in sources)
     asyncio.run(main.study_sources(knowledge.get_material(body['id']), 'Binary search tree'))
     assert len(calls) == 1  # Each concept is looked up once.
 
@@ -159,9 +159,9 @@ def test_ambiguous_topic_asks_which_meaning_then_drops_off_topic_pages(app_env, 
                      text='# Retrieval\nRetrieval-augmented generation retrieves documents before generating. ' * 20)]
     real_extract = knowledge.extract_concepts
 
-    async def spy_extract(documents, focus=None):
+    async def spy_extract(documents, focus=None, context=None, **kwargs):
         focuses.append((focus, [name for name, _ in documents]))
-        return await real_extract(documents, focus)
+        return await real_extract(documents, focus, context, **kwargs)
     monkeypatch.setattr(websearch, 'interpret_topic', interpret)
     monkeypatch.setattr(websearch, 'search', fake_search)
     monkeypatch.setattr(knowledge, 'extract_concepts', spy_extract)

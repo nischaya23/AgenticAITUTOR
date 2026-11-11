@@ -10,6 +10,7 @@ REAL_CALL_LLM = utils.call_llm
 @pytest.fixture
 def app_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, 'LLM_PROVIDER', 'openai')
+    monkeypatch.setattr(config, 'OBSERVER_LLM_ENABLED', False)
     engine = create_engine(f'sqlite:///{tmp_path / "test.db"}', connect_args={'check_same_thread': False})
     event.listen(engine, 'connect', db.sqlite_setup)
     factory = sessionmaker(engine, expire_on_commit=False)

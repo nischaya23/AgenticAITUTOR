@@ -34,6 +34,8 @@ async function setup(t, { draft, authenticated = true, openSession = true } = {}
   const messages = [];
   const requests = [];
   let socket;
+  let operationReady=false;
+  let memorySnapshot={revision:1,short_term:{concept:'Binary Search',question:'Find the first 2.',response:{text:workspace},plan:study.state.plan,assessment_pending:false},long_term:{mastery:{'Binary Search':.5},hypotheses:[]},items:[{id:'summary1',kind:'summary',original_text:'Practiced search.',effective_text:'Practiced search.',disputed:false,student_note:'',edits:[]}]};
   const intervals=[];
   const setInterval=w.setInterval.bind(w);
   w.setInterval=(callback,delay,...args)=>{intervals.push({callback,delay});return setInterval(callback,delay,...args);};
@@ -43,6 +45,7 @@ async function setup(t, { draft, authenticated = true, openSession = true } = {}
   w.fetch = async (url, options) => {
     if (url === '/api/auth/me') return { ok: authenticated, status: authenticated ? 200 : 401,
       json: async () => authenticated ? {user: {id: 1, email: 'student@example.com'}} : {detail: 'Please log in.'} };
+    if (url === '/api/sessions' && options?.method==='POST') return {ok:true,json:async()=>({id:3})};
     if (url === '/api/sessions') return { ok: true, json: async () => ({sessions: [
       {id: 1, material_id: 'm1', title: 'course.md', created_at: '2026-11-09T10:00:00Z', ended: false},
       {id: 2, material_id: 'm2', title: 'other-course.md', created_at: '2026-11-08T10:00:00Z', ended: false},
@@ -54,6 +57,11 @@ async function setup(t, { draft, authenticated = true, openSession = true } = {}
     if (url === '/api/sessions/2') return {ok: true, json: async () => ({history: [
       {id: 60, type: 'student_message', data: {content: 'Question from the second chat'}},
     ]})};
+    if(url.endsWith('/memory')) return {ok:true,json:async()=>memorySnapshot};
+    if(url.endsWith('/memory/corrections')) {const body=JSON.parse(options.body);requests.push({path:url,...body});memorySnapshot={...memorySnapshot,revision:2,items:memorySnapshot.items.map(item=>({...item,effective_text:body.text}))};return {ok:true,json:async()=>memorySnapshot};}
+    if(url==='/api/material-jobs/topic'){const body=JSON.parse(options.body);requests.push({path:url,...body});return {ok:true,json:async()=>({id:'j1'})};}
+    if(url==='/api/material-jobs/j1/meaning'){requests.push({path:url,...JSON.parse(options.body)});operationReady=true;return {ok:true,json:async()=>({id:'j1'})};}
+    if(url==='/api/operations/j1') return {ok:true,json:async()=>({id:'j1',status:operationReady?'ready':'needs_clarification',result:operationReady?{id:'m1'}:{type:'choices',meanings:[{label:'Retrieval-augmented generation',description:'Grounding answers in documents.',query:'RAG AI'}]},events:[{id:1,kind:'selected',title:'RAG guide',url:'https://example.org/rag',reason:'Explains retrieval and grounding.'}]})};
     if(options?.method === 'PUT'){ const body=JSON.parse(options.body); requests.push(body); return {ok:true,json:async()=>({type:'plan',plan:body.plan,plan_version:body.expected_version+1})}; }
     if(url==='/api/materials/web'){const body=JSON.parse(options.body);requests.push({path:url,...body});return body.meaning
       ?{ok:false,status:400,json:async()=>({detail:'stop after choice'})}
@@ -169,29 +177,16 @@ test('annotations decorate exact Unicode-aware ranges and dismissal preserves st
   assert.equal(document.querySelector('.cm-line').textContent, workspace);
 });
 
-test('binary search playback shows interval, controls and explanations', async t => {
-  const { document, dispatch } = await setup(t);
-  dispatch({ type: 'intervention', event_id: 2, revision: 1, result: {
-    type: 'visualization', content: 'Find the lower bound.', metadata: { visualization: {
-      kind: 'binary_search', title: 'Search trace', array: [2], target: 2,
-      steps: [
-        { left: 0, right: 1, mid: 0, comparison: 'equal', explanation: 'Found a match.' },
-        { left: 0, right: 0, mid: null, comparison: 'complete', explanation: 'Finish at index 0.' },
-      ],
-    } },
-  } });
-  const player = await until(() => document.querySelector('.visual-player'));
-  const button = name => [...player.querySelectorAll('button')].find(item => item.textContent === name);
-  assert.match(player.textContent, /Interval \[0, 1\)/);
-  button('Next').click();
-  await until(() => player.textContent.includes('Step 2 of 2'));
-  button('Previous').click();
-  await until(() => player.textContent.includes('Step 1 of 2'));
-  button('Play').click();
-  await until(() => player.textContent.includes('Step 2 of 2'));
-  button('Restart').click();
-  await until(() => player.textContent.includes('Step 1 of 2'));
+test('video visualization exposes native playback and chapter explanations', async t => {
+  const {document,dispatch}=await setup(t);
+  dispatch({type:'intervention',event_id:2,revision:1,result:{type:'visualization',content:'Find the lower bound.',metadata:{video:{title:'Search trace',url:'/api/videos/example',duration:15,chapters:[{start:0,end:15,text:'Keep searching for an earlier match.'}]}}}});
+  const player=await until(()=>document.querySelector('.video-player'));
+  assert.equal(player.querySelector('video').controls,true);
+  assert.match(player.querySelector('video').src,/api\/videos\/example/);
+  assert.match(player.textContent,/earlier match/);
+  assert.ok(player.querySelector('select'));
 });
+
 
 test('manual tools still use the existing WebSocket request protocol', async t => {
   const { document, messages } = await setup(t);
@@ -221,46 +216,22 @@ test('student plan drafts survive incoming updates and save against the latest v
   assert.match(panel.textContent,/My edited objective/);
 });
 
-test('unified workspace edits diagrams and submits the exact text and graph together', async t => {
-  const {document,messages,window}=await setup(t);
-  assert.equal(document.querySelector('#answer'),null);
-  const response=document.querySelector('[aria-label="Your response"]');
-  const button=name=>[...response.querySelectorAll('button')].find(b=>b.textContent===name);
-  button('Add node').click();
-  await until(()=>response.querySelectorAll('.diagram-nodes>li').length===1);
-  button('Add node').click();
-  await until(()=>response.querySelectorAll('.diagram-nodes>li').length===2);
-  const selects=response.querySelectorAll('.diagram-connect select');
-  selects[0].value=selects[0].options[1].value;
-  selects[0].dispatchEvent(new window.Event('change',{bubbles:true}));
-  selects[1].value=selects[1].options[2].value;
-  selects[1].dispatchEvent(new window.Event('change',{bubbles:true}));
-  await until(()=>!button('Connect nodes').disabled);
-  button('Connect nodes').click();
-  await until(()=>response.querySelector('[aria-label="Response diagram arrows"] li'));
+test('workspace submits only text and contains no node or edge editor',async t=>{
+  const {document,messages}=await setup(t);
+  assert.equal(document.querySelector('.diagram'),null);
+  assert.equal(document.querySelector('.diagram-connect'),null);
   document.querySelector('#submit').click();
-  const attempt=await until(()=>messages.find(m=>m.type==='problem_attempt'));
-  assert.equal(attempt.response.text,workspace);
-  assert.equal(attempt.response.diagram.nodes.length,2);
-  assert.equal(attempt.response.diagram.edges.length,1);
-  assert.equal(attempt.content,undefined);
-  assert.equal(messages.find(m=>m.action==='edit').response.diagram.edges.length,1);
+  const attempt=await until(()=>messages.find(message=>message.type==='problem_attempt'));
+  assert.deepEqual(attempt.response,{text:workspace});
 });
 
-test('diagram annotations stay inside the response and clear after renaming a node', async t=>{
-  const draft={text:'',diagram:{nodes:[{id:'a',label:'Student node',position:{x:0,y:0}}],edges:[]}};
-  const {document,dispatch,window}=await setup(t,{draft});
-  dispatch({type:'ack',event_id:1,event_type:'student_action',action:'edit',revision:2});
-  dispatch({type:'intervention',event_id:2,revision:2,proactive:false,result:{type:'highlight',content:'Check direction.',metadata:{annotations:[],diagram_annotations:[{target:'node',id:'a',reason:'This step may be reversed.'}]}}});
-  const response=document.querySelector('[aria-label="Your response"]');
-  await until(()=>response.querySelector('.diagram-issue'));
-  assert.match(response.textContent,/This step may be reversed/);
-  assert.equal(document.querySelector('#graph .diagram-issue'),null);
-  const input=response.querySelector('input[aria-label="Label for Student node"]');
-  Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'Renamed');
-  input.dispatchEvent(new window.Event('input',{bubbles:true}));
-  await until(()=>!response.querySelector('.diagram-issue'));
-  assert.match(window.localStorage.getItem('studyroom-draft-1-1'),/Renamed/);
+test('legacy local drafts restore their text without restoring diagrams',async t=>{
+  const {document,messages}=await setup(t,{draft:{text:'Legacy text',diagram:{nodes:[{id:'a'}],edges:[]}}});
+  await until(()=>document.querySelector('.cm-line').textContent==='Legacy text');
+  document.querySelector('#submit').click();
+  const attempt=await until(()=>messages.find(message=>message.type==='problem_attempt'));
+  assert.deepEqual(attempt.response,{text:'Legacy text'});
+  assert.equal(document.querySelector('.diagram'),null);
 });
 
 test('hypothesis panel reports origin, confidence, evidence and unavailable states',async t=>{
@@ -337,11 +308,46 @@ test('concept picker lists only unlocked concepts and web enhancement can be tog
   assert.deepEqual(requests.find(r=>r.path.endsWith('/web-enhance')),{path:'/api/materials/m1/web-enhance',enabled:true});
 });
 
-test('new chat keeps the upload-only landing page', async t => {
+test('new chat offers topic descriptions and optional uploads', async t => {
   const {document} = await setup(t, {openSession: false});
   assert.equal(document.querySelectorAll('#upload').length, 1);
   assert.equal(document.querySelector('#upload').multiple, true);
   assert.equal(document.querySelector('.app-header input[type=file]'), null);
-  assert.equal(document.querySelector('#web-topic'), null);
-  assert.match(document.querySelector('.new-chat-content h1').textContent, /Upload your notes/);
+  assert.ok(document.querySelector('#topic-description'));
+  assert.match(document.querySelector('.new-chat-content').textContent,/Build my learning map/);
+  assert.match(document.querySelector('.new-chat-content h1').textContent, /What would you like to learn/);
+});
+
+
+test('memory tab shows persisted memory and saves corrections',async t=>{
+  const {document,window,requests}=await setup(t);
+  document.querySelector('#memory-tab').click();
+  const panel=await until(()=>document.querySelector('[aria-label="Learning memory"]'));
+  await until(()=>panel.textContent.includes('Practiced search.'));
+  assert.match(panel.textContent,/Short-term/);
+  assert.match(panel.textContent,/50%/);
+  [...panel.querySelectorAll('button')].find(button=>button.textContent==='Correct').click();
+  const textarea=await until(()=>panel.querySelector('textarea'));
+  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(textarea,'I practiced duplicates.');
+  textarea.dispatchEvent(new window.Event('input',{bubbles:true}));
+  await new Promise(resolve=>setTimeout(resolve,20));
+  panel.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
+  await until(()=>requests.some(request=>request.path.endsWith('/memory/corrections')));
+  assert.equal(requests.at(-1).expected_revision,1);
+  assert.equal(requests.at(-1).text,'I practiced duplicates.');
+});
+
+test('topic preparation shows selected sources and resolves ambiguity before opening study',async t=>{
+  const {document,window,requests}=await setup(t,{openSession:false});
+  const textarea=document.querySelector('#topic-description');
+  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(textarea,'Teach me RAG');
+  textarea.dispatchEvent(new window.Event('input',{bubbles:true}));
+  await new Promise(resolve=>setTimeout(resolve,20));
+  document.querySelector('.topic-form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
+  const panel=await until(()=>document.querySelector('.preparation-panel'));
+  await until(()=>panel.textContent.includes('Explains retrieval and grounding.'));
+  assert.ok(panel.querySelector('a[href="https://example.org/rag"]'));
+  [...panel.querySelectorAll('button')].find(button=>button.textContent.includes('Retrieval-augmented')).click();
+  await until(()=>document.querySelector('#submit:not(:disabled)'));
+  assert.equal(requests.find(request=>request.path.endsWith('/meaning')).index,0);
 });

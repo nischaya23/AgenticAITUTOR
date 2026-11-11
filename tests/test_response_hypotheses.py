@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from backend import assessment, config, hypothesis, main, memory, observer, orchestrator, reflection, tools, utils
 from backend.db import Event, Session
-from backend.response import Diagram, Response, content_key
+from backend.response import Response, content_key
 from test_study import prepare
 
 
@@ -27,32 +27,15 @@ def item(reference='event:1'):
         diagnostic_focus='Trace an equal midpoint.', status='supported')
 
 
-@pytest.mark.parametrize('invalid', ['duplicate_node', 'duplicate_edge', 'endpoint', 'infinity', 'label', 'nodes', 'edges'])
-def test_diagram_validation(invalid):
-    value = diagram()
-    if invalid == 'duplicate_node': value['nodes'][1]['id'] = 'a'
-    if invalid == 'duplicate_edge': value['edges'] *= 2
-    if invalid == 'endpoint': value['edges'][0]['target'] = 'missing'
-    if invalid == 'infinity': value['nodes'][0]['position']['x'] = float('inf')
-    if invalid == 'label': value['nodes'][0]['label'] = 'x' * 201
-    if invalid == 'nodes': value['nodes'] *= 16
-    if invalid == 'edges': value['edges'] *= 61
-    with pytest.raises(ValidationError): Diagram.model_validate(value)
-
-
-def test_positions_do_not_change_diagnostic_content():
-    before = Response(text='Trace', diagram=diagram()).model_dump()
-    after = deepcopy(before)
-    after['diagram']['nodes'][0]['position']['x'] = 99
-    assert content_key(before) == content_key(after)
-    after['diagram']['nodes'][0]['label'] = 'New idea'
-    assert content_key(before) != content_key(after)
+def test_text_only_response_rejects_diagrams():
+    with pytest.raises(ValidationError): Response(text='answer',diagram=diagram())
+    assert content_key({'text':'First'})!=content_key({'text':'Second'})
 
 
 async def test_unified_response_is_atomic_persistent_and_submission_is_immutable(app_env, monkeypatch):
     client, factory, _ = app_env
     sid, _, study = prepare(client)
-    submitted = dict(text='A complete explanation.', diagram=diagram())
+    submitted = dict(text='A complete explanation.')
     job = ingest(factory, sid, type='problem_attempt', response=submitted,
                  problem_id=study['state']['current_problem']['id'])
     ingest(factory, sid, type='student_action', action='edit', response=dict(text='Later edits'))
@@ -72,10 +55,10 @@ async def test_unified_response_is_atomic_persistent_and_submission_is_immutable
         assert memory.get_long_term_memory(db, db.get(Session, sid).user_id)['hypotheses']
 
 
-async def test_diagram_only_grade_uses_full_response(app_env, monkeypatch):
+async def test_text_grade_uses_full_response(app_env, monkeypatch):
     client, factory, _ = app_env
     sid, _, study = prepare(client)
-    response = Response(diagram=diagram()).model_dump()
+    response = Response(text='A complete explanation.').model_dump()
     job = ingest(factory, sid, type='problem_attempt', response=response,
                  problem_id=study['state']['current_problem']['id'])
     model = AsyncMock(return_value=assessment.Assessment(correct=True, score=1,
@@ -106,35 +89,25 @@ def test_legacy_workspace_adapter_and_response_persistence(app_env):
         row.state = {k: v for k, v in row.state.items() if k not in ('response', 'response_revision')}
         row.state = {**row.state, 'workspace': 'Legacy answer'}
     assert client.get(f'/api/sessions/{sid}').json()['state']['response']['text'] == 'Legacy answer'
-    moved = dict(text='New response', diagram=diagram())
+    moved = dict(text='New response')
     job = ingest(factory, sid, type='student_action', action='edit', response=moved)
     saved = client.get(f'/api/sessions/{sid}').json()['state']
     assert saved['response'] == moved and saved['workspace'] == 'New response'
     assert job['draft_changed'] and saved['response_revision'] == 1
-    moved['diagram']['nodes'][0]['position']['x'] = 77
     assert not ingest(factory, sid, type='student_action', action='edit', response=moved)['draft_changed']
 
 
-def test_diagram_annotations_only_reference_response_elements():
-    context = dict(workspace='', response=Response(diagram=diagram()).model_dump(), knowledge=[])
-    args = dict(content='Reconsider this arrow.', concept='Flow', issues=[],
-        diagram_annotations=[dict(target='edge', id='ab', reason='Explain the direction.')])
-    result = tools.reasoning_review(args, context)
-    assert result['metadata']['diagram_annotations'][0]['id'] == 'ab'
-    args['diagram_annotations'][0]['id'] = 'question-only'
-    with pytest.raises(ValueError): tools.reasoning_review(args, context)
-    result['metadata']['target'] = 'material'
-    with pytest.raises(ValueError): tools.validate_target(result, context)
+def test_diagram_annotations_are_no_longer_accepted():
+    with pytest.raises(ValidationError):
+        tools.ReasoningReviewArgs(content='Review',concept='Flow',issues=[],diagram_annotations=[])
 
 
-@pytest.mark.parametrize('format', ['explanation', 'trace', 'diagram_interpretation', 'diagram_construction'])
+@pytest.mark.parametrize('format', ['explanation', 'trace'])
 async def test_all_question_formats_and_private_answers(app_env, monkeypatch, format):
     client, factory, _ = app_env
     sid, _, study = prepare(client)
     question = tools.Problem(prompt='Explain or draw the flow.', concept='Binary Search',
-        expected_answer='PRIVATE REFERENCE', rubric='PRIVATE RUBRIC', format=format,
-        diagram=diagram() if format == 'diagram_interpretation' else None,
-        starter_diagram=diagram() if format == 'diagram_construction' else None)
+        expected_answer='PRIVATE REFERENCE', rubric='PRIVATE RUBRIC', format=format)
     monkeypatch.setattr(utils, 'call_llm', AsyncMock(return_value=question))
     generated = await tools.generate_problem('Binary Search', hypotheses=[item()],
         eligible_concepts=['Binary Search'], recent_formats=['trace'], plan=study['state']['plan'])

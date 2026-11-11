@@ -14,23 +14,30 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import delete, select
 from . import logging_setup as logs
-from . import auth, websearch, hypothesis, plans, config, knowledge, memory, orchestrator, tools, utils
+from . import auth, websearch, hypothesis, plans, config, knowledge, memory, orchestrator, tools, utils, context, research, operations
 from .response import Response, response_for
-from .db import Session, Event, Concept, Login, Material, SessionLocal, init_db, append_event
+from .db import Session, Event, Concept, Login, Material, Operation, SessionLocal, init_db, append_event
 
 SOCKETS: dict[int, set] = defaultdict(set)
 TASKS: dict[int, set] = defaultdict(set)
 LOCKS: dict[int, asyncio.Lock] = {}
 LOG = logging.getLogger('tutor')
 DRAFTS = None
+REVIEWS = None
 
 
 @asynccontextmanager
 async def lifespan(app):
-    global DRAFTS
+    global DRAFTS, REVIEWS
     logs.setup()
     init_db()
+    with SessionLocal.begin() as db:
+        for operation in db.scalars(select(Operation).where(Operation.status == 'running')):
+            operation.status = 'interrupted'
+            operation.data = {**operation.data, 'error': 'Interrupted by restart. Please retry.'}
     DRAFTS = hypothesis.DraftScheduler(SessionLocal, broadcast, track_task)
+    from .observer_review import ReviewScheduler
+    REVIEWS = ReviewScheduler(SessionLocal, broadcast, track_task, run_job)
     with SessionLocal.begin() as db:
         for row in db.scalars(select(Session)):
             if row.state.get('observer', {}).get('pending_wake'):
@@ -39,12 +46,22 @@ async def lifespan(app):
                 row.state = {**row.state, 'assessment_pending': False,
                     'assessment_stages': {k: 'unavailable' if v in ('analyzing', 'waiting') else v
                         for k, v in row.state.get('assessment_stages', {}).items()}}
+            state = dict(row.state)
+            state['response'] = response_for(state)
+            state['pending_video'] = None
+            problem = dict(state.get('current_problem', {}))
+            if problem.get('format') in ('diagram_construction', 'diagram_interpretation') and not problem.get('solved'):
+                state['current_problem'] = {}
+                state['legacy_question_replaced'] = True
+            else:
+                state['current_problem'] = {k:v for k,v in problem.items() if k not in ('diagram', 'starter_diagram')}
+            row.state = state
             panel = row.state.get('hypothesis_state', {})
             if panel.get('status') == 'analyzing':
                 row.state = {**row.state, 'hypothesis_state': {**panel, 'status': 'unavailable',
                     'error': 'Analysis interrupted. Edit your response to analyze again.'}}
     yield
-    pending = [t for group in TASKS.values() for t in group]
+    pending = [t for group in TASKS.values() for t in group] + list(operations.TASKS)
     for task in pending:
         task.cancel()
     await asyncio.gather(*pending, return_exceptions=True)
@@ -53,6 +70,10 @@ async def lifespan(app):
     LOCKS.clear()
     utils._PROVIDER_LIMITS.pop(asyncio.get_running_loop(), None)
     DRAFTS = None
+    if REVIEWS:
+        REVIEWS.cancel_all()
+    from .video import _LOCKS
+    _LOCKS.clear()
     logs.shutdown()
 
 
@@ -98,11 +119,11 @@ def observer_status(state):
 
 
 def public_state(state: dict) -> dict:
-    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k not in ('observer', 'log_uuid')},
+    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k not in ('observer', 'log_uuid', 'submitted_response')},
         'response': response_for(state), 'response_revision': state.get('response_revision', 0),
         'hypothesis_state': hypothesis.view(state),
         'current_problem': {k: v for k, v in state.get('current_problem', {}).items()
-                            if k not in ('expected_answer', 'rubric')}}
+                            if k not in ('expected_answer', 'rubric', 'diagram', 'starter_diagram')}}
 
 
 def require_session(db, session_id: int):
@@ -272,9 +293,10 @@ async def _new_problem(session_id: int, request: ProblemRequest):
         if initial['ended']:
             raise HTTPException(409, 'Start a new session first.')
         revision = initial['revision']
+        question_context = context.for_session(db, session_id)
     try:
         sources = knowledge.retrieve_knowledge(request.concept, user_id=user_id)
-        problem = await tools.generate_problem(request.concept, sources=sources, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
+        problem = await tools.generate_problem(request.concept, learning_context=question_context, sources=sources, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
             hypotheses=hypothesis.eligible(initial), hypothesis_version=initial.get('hypothesis_state', {}).get('version', 0),
             recent_formats=initial.get('recent_formats', []), previous_prompts=initial.get('recent_questions', []))
     except (RuntimeError, ValueError) as exc:
@@ -285,7 +307,7 @@ async def _new_problem(session_id: int, request: ProblemRequest):
         if state['ended'] or state['revision'] != revision:
             raise HTTPException(409, 'Work changed while generating a problem; try again.')
         state.update(current_problem=problem, current_concept=request.concept, workspace='',
-                     response=Response(diagram=problem.get('starter_diagram') or {}).model_dump(),
+                     response=Response().model_dump(),
                      response_revision=state.get('response_revision', 0)+1, assessment_pending=False,
                      plan=state.get('plan', {}) if state.get('material_id') else {},
                      revision=state['revision']+1, observer={})
@@ -334,16 +356,36 @@ async def upload_material(request: Request, file: UploadFile | None = File(None)
         raise HTTPException(400, str(exc)) from exc
 
 
-async def build_material(user_id: int, documents: list[tuple], extra: dict | None = None, focus: str | None = None) -> dict:
-    """Extract one concept graph from (name, bytes, text[, url]) documents and save it for the user."""
-    graph = await knowledge.extract_concepts([(document[0], document[2]) for document in documents], focus)
+async def build_material(user_id: int, documents: list[tuple], extra: dict | None = None, focus: str | None = None, do_research=True) -> dict:
+    extra = dict(extra or {})
+    original = list(documents)
+    with SessionLocal() as db:
+        learning_context = context.preparation(db, user_id, extra.get('learning_request', focus or knowledge.material_title([d[0] for d in documents])))
+    pages = []
+    if do_research:
+        await operations.progress('reading', message='Identifying the subject and researching gaps and prerequisites.')
+        try:
+            pages = await research.investigate({**learning_context,
+                'uploaded_excerpts': [dict(name=d[0], text=d[2][:8000 // max(1,len(documents))]) for d in documents]},
+                required=True, budget=3)
+        except Exception as exc:
+            logs.event('upload.research_failed', error=type(exc).__name__)
+            await operations.progress('research_unavailable', message='Research unavailable; using uploaded evidence.')
+        documents += [(p['title'],p['text'].encode(),p['text'],p['url']) for p in pages]
+    await operations.progress('building_graph', message='Building concepts and prerequisites with source evidence.')
+    graph = await knowledge.extract_concepts([(d[0],d[2]) for d in documents], focus, learning_context,
+        primary_count=0 if extra.get('origin') in ('web','topic') else len(original))
     with SessionLocal.begin() as db:
         graph = knowledge.store_graph(db, graph, isolated=True)
+    extra.setdefault('name', knowledge.material_title([d[0] for d in original]))
+    extra.setdefault('web_enhance', False)
+    extra['web_sources'] = list({p['url']:dict(title=p['title'],url=p['url']) for p in pages if p['url']}.values()) or extra.get('web_sources', [])
+    extra['graph_sources'] = [dict(id=f'D{i}', title=d[0], url=d[3] if len(d)>3 else None) for i,d in enumerate(documents,1)]
     record = await asyncio.to_thread(knowledge.save_materials, documents, graph.model_dump(), extra)
     with SessionLocal.begin() as db:
         db.add(Material(id=record['id'], user_id=user_id))
-    return {'id': record['id'], 'name': record['name'], 'sources': record['sources'], 'web_enhance': record['web_enhance'],
-            'web_sources': record.get('web_sources', []), 'concepts': graph.model_dump()}
+    return {'id':record['id'], 'name':record['name'], 'sources':record['sources'],
+        'web_enhance':record['web_enhance'], 'web_sources':record.get('web_sources', []), 'concepts':graph.model_dump()}
 
 
 class WebEnhanceRequest(utils.Schema):
@@ -362,7 +404,7 @@ async def set_web_enhance(material_id: str, body: WebEnhanceRequest, request: Re
 
 
 class WebTopicRequest(utils.Schema):
-    topic: str = Field(min_length=2, max_length=200)
+    topic: str = Field(min_length=2, max_length=10000)
     meaning: websearch.Meaning | None = None
 
 
@@ -387,7 +429,7 @@ async def web_material(request: Request, body: WebTopicRequest):
         links += [link for page in pages for link in page.get('links', []) if link['url']]
         return await build_material(request.state.user_id, documents,
             {'name': f'Web: {meaning.label}', 'origin': 'web', 'topic': meaning.label, 'topic_description': meaning.description,
-             'web_sources': links, 'web_enhance': True}, focus=subject)
+             'web_sources': links, 'web_enhance': True, 'learning_request': topic}, focus=subject, do_research=False)
     except (ValueError, RuntimeError, UnicodeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -402,19 +444,19 @@ def web_query(material: dict, concept: str) -> str:
     return ' '.join([concept, *related[:2]])
 
 
-async def study_sources(material: dict, concept: str) -> list[dict]:
+async def study_sources(material: dict, concept: str, learning_context=None) -> list[dict]:
     """Passages for a concept. The agent searches the web once per concept when the material has
     nothing on it, or for every concept when the material has web enhancement turned on."""
     enhance = material.get('web_enhance', False)
     hits = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 8, material['id'])
     added = []
-    if websearch.enabled() and concept not in material.get('web_lookups', []) and (enhance or not hits):
+    if websearch.enabled() and concept not in material.get('web_lookups', []) and ((enhance and not any(c.get('url') for c in hits)) or not hits):
         try:
             query = web_query(material, concept)
             # Uploads have no topic, so related concepts from the map tell the filter which subject is meant.
             subject = f"{concept} (in {material['topic']}: {material.get('topic_description', '')})" if material.get('topic') \
                 else f'{concept}, studied together with: {query}'
-            pages = await websearch.relevant_pages(await websearch.search(query, max_pages=2), subject)
+            pages = await research.investigate({**(learning_context or {}), 'subject':subject, 'suggested_query':query},required=True,budget=2)
             added = await asyncio.to_thread(knowledge.add_web_documents, material['id'], pages, concept)
             logs.event('agent.web_lookup', concept=concept, pages=len(pages), chunks=len(added))
             hits = await asyncio.to_thread(knowledge.retrieve_knowledge, concept, 8, material['id'])
@@ -424,7 +466,7 @@ async def study_sources(material: dict, concept: str) -> list[dict]:
         return added[:3] or material['chunks'][:3]
     if not enhance:
         return hits[:4]
-    mixed = [c for c in hits if 'lookup' not in c][:2] + [c for c in hits if 'lookup' in c][:2]
+    mixed = [c for c in hits if not c.get('url')][:2] + [c for c in hits if c.get('url')][:2]
     return mixed + [c for c in hits if c not in mixed][:4 - len(mixed)]
 
 
@@ -474,6 +516,7 @@ async def advance_study(session_id: int, chosen: str | None = None) -> dict | No
         if state.get('ended'):
             return study_snapshot(db, session_id)
         material = knowledge.get_material(state['material_id'])
+        question_context = context.for_session(db, session_id)
         mastery = memory.get_observer_memory(db, row.user_id)['mastery']
         concept = chosen or select_study_concept(material['graph'], mastery, state.get('focus_concept'))
         focus = concept if concept in (chosen, state.get('focus_concept')) else None
@@ -487,8 +530,8 @@ async def advance_study(session_id: int, chosen: str | None = None) -> dict | No
                 return None
             memory.update_short_term_memory(db, session_id, {'study_complete': True})
             return study_snapshot(db, session_id)
-    sources = await study_sources(material, concept)
-    problem = await tools.generate_problem(concept, sources=sources, previous_prompts=recent, plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
+    sources = await study_sources(material, concept, question_context)
+    problem = await tools.generate_problem(concept, learning_context=question_context, sources=sources, previous_prompts=recent, plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
         hypotheses=hypothesis.eligible(state), hypothesis_version=state.get('hypothesis_state', {}).get('version', 0),
         eligible_concepts=eligible, recent_formats=state.get('recent_formats', []))
     with SessionLocal.begin() as db:
@@ -499,7 +542,7 @@ async def advance_study(session_id: int, chosen: str | None = None) -> dict | No
         temporal = {k: v for k, v in current.get('observer', {}).items()
                     if k in ('last_intervention_at', 'hint_times')}
         current.update(current_concept=concept, current_problem=problem, workspace='',
-                       response=Response(diagram=problem.get('starter_diagram') or {}).model_dump(),
+                       response=Response().model_dump(),
                        response_revision=current.get('response_revision', 0)+1, assessment_pending=False,
                        question_generation_error=None, recent_formats=(current.get('recent_formats', [])+[problem.get('format', 'explanation')])[-6:],
                        observer=temporal, revision=revision+1, study_complete=False, focus_concept=focus,
@@ -714,7 +757,13 @@ async def _run_job(job: dict):
     async with LOCKS.setdefault(sid, asyncio.Lock()):
         await broadcast(sid, {'type': 'busy', 'active': True})
         try:
-            outputs = await orchestrator.handle(job)
+            async def research_progress(kind, **data):
+                await broadcast(sid, {'type':'research_progress','kind':kind,**data})
+            token = operations.EMITTER.set(research_progress)
+            try:
+                outputs = await orchestrator.handle(job)
+            finally:
+                operations.EMITTER.reset(token)
             for output in outputs:
                 await broadcast(sid, output)
             assessment_output = next((o for o in outputs if o['type'] == 'assessment'), None)
@@ -781,6 +830,9 @@ async def _run_job(job: dict):
                 if DRAFTS and job['kind'] == 'problem_attempt' and state.get('response_revision', 0) != job.get('response_revision'):
                     DRAFTS.schedule(sid)
             await broadcast(sid, {'type': 'busy', 'active': False})
+            await memory_changed(sid)
+            if REVIEWS and job['kind'] == 'problem_attempt':
+                REVIEWS.schedule(sid, job, priority=True)
 
 
 async def run_job(job):
@@ -843,7 +895,13 @@ async def websocket(socket: WebSocket, session_id: int):
                 await socket.send_json(ack)
                 with SessionLocal() as db:
                     await broadcast(session_id, {'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
-                if job['explicit'] or job['decision'] == 'WAKE' or job['kind'] in ('problem_attempt', 'session_end', 'feedback'):
+                if REVIEWS and not job['explicit'] and job['kind'] not in ('problem_attempt', 'feedback', 'session_end'):
+                    REVIEWS.schedule(session_id, job)
+                if job['kind'] == 'session_end':
+                    from .features import cancel_videos
+                    cancel_videos(session_id)
+                    if REVIEWS: REVIEWS.cancel(session_id)
+                if job['explicit'] or (not config.OBSERVER_LLM_ENABLED and job['decision'] == 'WAKE') or job['kind'] in ('problem_attempt', 'session_end', 'feedback'):
                     task = asyncio.create_task(run_job(job))
                     track_task(session_id, task)
             except (ValidationError, ValueError) as exc:
@@ -852,3 +910,16 @@ async def websocket(socket: WebSocket, session_id: int):
         pass
     finally:
         SOCKETS[session_id].discard(socket)
+
+
+async def memory_changed(session_id):
+    with SessionLocal() as db:
+        row = db.get(Session, session_id)
+        if row is None:
+            return
+        ids = list(db.scalars(select(Session.id).where(Session.user_id == row.user_id)))
+    for sid in ids:
+        await broadcast(sid, {'type':'memory_changed'})
+
+from .features import router as feature_router
+app.include_router(feature_router)

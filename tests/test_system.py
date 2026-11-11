@@ -38,7 +38,7 @@ def stalled(factory, sid):
 def test_tables_fk_append_only_and_restart(app_env):
     client, factory, engine = app_env
     sid = create(client)
-    assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges','logins','materials'}
+    assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges','logins','materials','memory_items','operations','operation_events'}
     with factory.begin() as connection:
         row = connection.get(db.Session, sid)
         memory.update_long_term_memory(connection, row.user_id, {'memories':['I prefer invariants.']})
@@ -71,8 +71,8 @@ async def test_all_five_tools_have_valid_outputs(app_env, kind):
         assert annotation['end'] > annotation['start']
         tools.validate_target(result, context)
     if kind == 'visualization':
-        assert result['metadata']['visualization']['kind'] == 'binary_search'
-        assert result['metadata']['visualization']['steps']
+        assert 'draw_frame' in result['metadata']['video_script']['code']
+        assert result['metadata']['video_script']['chapters']
     definition = tools.function_definition(kind)
     assert definition['strict'] and definition['parameters']['additionalProperties'] is False
 
@@ -290,6 +290,8 @@ async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypat
         return SimpleNamespace(output_parsed=parsed,usage=usage)
     async def create_response(**kwargs):
         assert kwargs['tools'][0]['type']=='function'
+        if kwargs['tools'][0]['name']=='web_search':
+            return SimpleNamespace(output=[SimpleNamespace(type='function_call',name='finish_research',call_id='research-finished',arguments=json.dumps({'reason':'No additional evidence needed.'}))],usage=usage)
         assert kwargs['tool_choice']=={'type':'function','name':'hint'}
         return SimpleNamespace(output=[SimpleNamespace(type='function_call',name='hint',arguments=json.dumps({'content':'Consider the left boundary.','concept':'Binary Search'}))],usage=usage)
     fake=SimpleNamespace(responses=SimpleNamespace(parse=AsyncMock(side_effect=parse),create=AsyncMock(side_effect=create_response)))
@@ -298,8 +300,8 @@ async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypat
     monkeypatch.setattr(utils,'call_llm',call_llm)
     output=await orchestrator.handle(ingest(factory,sid,type='student_message',content='Can I have a clue?'))
     assert output[0]['result']['content']=='Consider the left boundary.'
-    assert utils.METRICS['llm_calls']==3 and utils.METRICS['output_tokens']==60
-    assert fake.responses.parse.await_count==2 and fake.responses.create.await_count==1
+    assert utils.METRICS['llm_calls']==4 and utils.METRICS['output_tokens']==80
+    assert fake.responses.parse.await_count==2 and fake.responses.create.await_count==2
 
 
 async def test_observer_performance_and_metric_counts(app_env):

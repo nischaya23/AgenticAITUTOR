@@ -35,3 +35,6 @@ WEB_SEARCH_CONTACT = os.getenv('WEB_SEARCH_CONTACT', 'https://github.com/nischay
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
+OBSERVER_LLM_ENABLED = os.getenv('OBSERVER_LLM_ENABLED', 'true').lower() == 'true'
+OBSERVER_REVIEW_SECONDS = 30
+OBSERVER_PAUSE_SECONDS = 8

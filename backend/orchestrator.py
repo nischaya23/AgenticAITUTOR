@@ -1,30 +1,15 @@
 """Python routing with snapshot checks before committing teaching output."""
 from copy import deepcopy
 from sqlalchemy import select
-from . import hypothesis, plans, activity, assessment, memory, observer, planner, reflection, student_model, tools, tutor, utils
+from . import config, hypothesis, plans, activity, assessment, memory, observer, planner, reflection, student_model, tools, tutor, utils
 from .response import Response, response_for, content_key, has_content
 from .logging_setup import event as log_event
 from .db import Event, Session, append_event
 
 
 def context_for(db, session_id: int, query: str = '') -> dict:
-    row = db.get(Session, session_id)
-    state = memory.get_short_term_memory(db, session_id)
-    problem = state.get('current_problem', {})
-    public_problem = {k: v for k, v in problem.items() if k not in ('expected_answer', 'rubric')}
-    history = memory.get_relevant_history(db, session_id)
-    # Avoid sending policy matrices and the internal event stream to the model.
-    history = [e for e in history if e['type'] in ('student_message', 'problem_attempt', 'intervention', 'assessment', 'feedback')][-12:]
-    log_event('agent.context', session_id=session_id, plan_version=state.get('plan_version', 0))
-    model = student_model.get_student_model(db, row.user_id)
-    return dict(concept=state['current_concept'], problem=public_problem,
-        workspace=response_for(state)['text'], response=response_for(state),
-        hypotheses=hypothesis.eligible(state), plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
-        student={k: v for k, v in model.items() if k != 'policy'}, history=history,
-        knowledge=tools.retrieve_knowledge(f'{state["current_concept"]} {query[:1000]}',
-                                           material_id=state.get('material_id'), user_id=row.user_id),
-        prerequisites=tools.get_prerequisites(db, state['current_concept'],
-                                             material_id=state.get('material_id'), user_id=row.user_id), query=query)
+    from .context import for_session
+    return for_session(db, session_id, query)
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):
@@ -32,8 +17,12 @@ def persist_observation(db, row, state: dict, kind: str, data: dict):
     policy = model['policy'] or observer.new_policy()
     if not model['policy']:
         memory.update_long_term_memory(db, row.user_id, {'policy': policy})
+    existing = dict(state.get('observer', {}))
     action, o, features = observer.observe(state, kind, data,
         model['mastery'].get(state['current_concept'], .5), policy)
+    if config.OBSERVER_LLM_ENABLED:
+        if not existing.get('pending_wake'): o.pop('pending_wake', None)
+        if not existing.get('pending_decision'): o.pop('pending_decision', None)
     state['observer'] = o
     retired = o.pop('retired_outcome', None)
     if retired:
@@ -140,9 +129,23 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         needs_plan = not state.get('plan', {}).get('steps')
     plan = await planner.create_learning_plan(context) if needs_plan else context['plan']
     context['plan'] = plan
-    selection = await planner.select_intervention(context, explicit, job.get('requested'))
+    from . import research, knowledge
+    from . import operations
+    if job.get('requested') == 'web_search' or (explicit and not job.get('requested')) or not context['knowledge']:
+        pages = await research.investigate(context, required=job.get('requested') == 'web_search')
+        if pages:
+            with SessionLocal() as db:
+                material_id = db.get(Session, sid).state.get('material_id')
+            if material_id:
+                knowledge.add_web_documents(material_id, pages, context['concept'])
+                with SessionLocal() as db:
+                    context = context_for(db, sid, job['content'])
+            else:
+                context['knowledge'] += [dict(id=p['url'],source=p['title'],text=p['text'][:2000]) for p in pages]
+    selection = await planner.select_intervention(context, explicit or job.get('observer_approved', False),
+        'explanation' if job.get('requested') == 'web_search' else job.get('requested'))
     if selection['action'] == 'none':
-        if explicit:
+        if explicit or job.get('observer_approved'):
             selection = {'action': 'explanation', 'strategy': 'Answer the explicit question.'}
         else:
             with SessionLocal.begin() as db:
@@ -150,14 +153,19 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
                 append_event(db, sid, 'plan', {'decision': 'none', 'trigger_event_id': job['event_id']})
             return None
     result = await tutor.respond_to_student(context, selection)
-    result['metadata']['retrieved_sources'] = [dict(id=c['id'], source=c['source']) for c in context['knowledge']]
+    if 'video_script' in result.get('metadata', {}):
+        from .features import queue_video
+        return await queue_video(job, result, context)
+    result['metadata']['retrieved_sources'] = [dict(id=c['id'], source=c['source'], url=c.get('url')) for c in context['knowledge']]
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
         current = deepcopy(row.state)
         # Read fresh after all awaits; new edits, problems and questions invalidate proactive output.
         changed_problem = current['current_problem'].get('id') != job['problem'].get('id')
+        model=memory.get_long_term_memory(db,row.user_id)
+        context_changed = current.get('plan_version',0)!=context.get('plan_version',0) or model.get('memory_revision',0)!=context.get('snapshot',{}).get('memory_revision',model.get('memory_revision',0))
         if current['ended'] or changed_problem or (not explicit and
-                (current['revision'] != snapshot or not current['proactive_enabled'])):
+                (current['revision'] != snapshot or not current['proactive_enabled'] or context_changed)):
             clear_pending_wake(db, sid)
             utils.METRICS['stale_interventions'] += 1
             return None
@@ -176,6 +184,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         o = current['observer']
         o.pop('pending_wake', None)
         o['last_intervention_at'] = utils.now()
+        o['intervention_response_key'] = content_key(response_for(current))
         if result['type'] == 'hint':
             o['hint_times'] = o.get('hint_times', [])[-9:] + [utils.now()]
         if not explicit:
@@ -246,7 +255,7 @@ async def _assess(job):
         if summary:
             model = memory.get_long_term_memory(db, row.user_id)
             memory.update_long_term_memory(db, row.user_id, {'memories': model['memories']+[summary['summary']],
-                'learning_goals': [summary['next_goal']]})
+                'learning_goals': [summary['next_goal']]}, evidence_id=evidence_id)
             append_event(db, sid, 'reflection', {**summary, 'scope': 'answer', 'tentative': not result['verified'], 'evidence_event_id': evidence_id})
         state['assessment_stages'] = {'reflection': 'ready' if summary else 'unavailable', 'hypotheses': 'analyzing'}
         memory.update_short_term_memory(db, sid, state)
@@ -314,7 +323,8 @@ async def _handle(job: dict) -> list[dict]:
                 outputs.append(plans.view(db.get(Session, sid).state))
     if job['kind'] == 'session_end':
         outputs.append({'type': 'session_summary', 'result': {'summary': 'Session ended. Answer reflections were saved during grading.', 'next_goal': 'Resume your learning when ready.'}})
-    if job['kind'] != 'session_end' and (job['explicit'] or job['decision'] == 'WAKE'):
+    from . import config
+    if job['kind'] != 'session_end' and (job['explicit'] or job.get('observer_approved') or (not config.OBSERVER_LLM_ENABLED and job['decision'] == 'WAKE')):
         try:
             result = await deliver_intervention(job, job['explicit'])
             if result:

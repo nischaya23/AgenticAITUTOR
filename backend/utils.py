@@ -19,7 +19,7 @@ class ClientEvent(Schema):
                   'code_execution', 'feedback', 'session_end', 'preferences']
     content: str = Field(default='', max_length=20000)
     action: Literal['edit', 'revert', 'problem_opened', 'idle', 'hint_request', ''] = ''
-    tool: Literal['hint', 'explanation', 'highlight', 'visualization', 'guiding_question'] | None = None
+    tool: Literal['hint', 'explanation', 'highlight', 'visualization', 'guiding_question', 'web_search'] | None = None
     rating: Literal[-1, 1] | None = None
     intervention_id: int | None = None
     proactive_enabled: bool | None = None
@@ -65,6 +65,8 @@ class StudentData(BaseModel):
     effective_interventions: dict[str, JsonValue] = Field(default_factory=dict)
     policy: dict[str, JsonValue] = Field(default_factory=dict)
     hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=8)
+    memory_revision: int = 0
+    student_goals: list[str] = Field(default_factory=list)
 
 
 @lru_cache
@@ -107,6 +109,8 @@ async def _call_llm(
         if not selected_model:
             raise ValueError(f"No model configured for {provider}.")
 
+        from .context import compact_payload
+        input_data = compact_payload(input_data)
         payload = (
             input_data
             if isinstance(input_data, str)
@@ -114,12 +118,10 @@ async def _call_llm(
         )
 
         if len(payload) > config.MAX_INPUT_CHARS:
-            payload = (
-                payload[:config.MAX_INPUT_CHARS]
-                + prompts.CONTEXT_TRUNCATED
-            )
+            raise ValueError("Context exceeds the input budget; shorten the current task.")
 
         timeout = config.API_TIMEOUT * 3 + 5
+        history = kwargs.pop("tool_history", [])
         wants_tools = bool(kwargs.get("tools"))
         output_budget = max_output_tokens if max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
@@ -128,12 +130,23 @@ async def _call_llm(
                 "Request structured output and tool calls separately."
             )
 
+        native_input = [{'role': 'user', 'content': payload}]
+        chat_history = []
+        for turn in history:
+            native_input.extend([
+                {'type': 'function_call', 'call_id': turn['call_id'], 'name': turn['name'], 'arguments': turn['arguments']},
+                {'type': 'function_call_output', 'call_id': turn['call_id'], 'output': json.dumps(turn['result'])}])
+            chat_history.extend([
+                {'role': 'assistant', 'tool_calls': [turn.get('provider_call') or {'id': turn['call_id'], 'type': 'function',
+                    'function': {'name': turn['name'], 'arguments': turn['arguments']}}]},
+                {'role': 'tool', 'tool_call_id': turn['call_id'], 'content': json.dumps(turn['result'])}])
+
         # Existing OpenAI implementation.
         if provider == "openai":
             args = dict(
                 model=selected_model,
                 instructions=instructions,
-                input=payload,
+                input=native_input if history else payload,
                 max_output_tokens=output_budget,
                 store=False,
                 **kwargs,
@@ -175,6 +188,7 @@ async def _call_llm(
             messages=[
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": payload},
+                *chat_history,
             ],
             max_tokens=output_budget,
             **extra,
@@ -260,6 +274,10 @@ async def _call_llm(
             calls = [
                 SimpleNamespace(
                     type="function_call",
+                    call_id=call.id,
+                    provider_call=call.model_dump(exclude_none=True) if hasattr(call,'model_dump') else dict(
+                        id=call.id,type='function',function=dict(name=call.function.name,arguments=call.function.arguments),
+                        **({'extra_content':call.extra_content} if getattr(call,'extra_content',None) else {})),
                     name=call.function.name,
                     arguments=call.function.arguments,
                 )

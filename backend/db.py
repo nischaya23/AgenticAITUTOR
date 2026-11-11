@@ -72,6 +72,31 @@ class ConceptEdge(Base):
     to_id: Mapped[int] = mapped_column(ForeignKey('concepts.id'), primary_key=True)
 
 
+class MemoryItem(Base):
+    __tablename__ = 'memory_items'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Operation(Base):
+    __tablename__ = 'operations'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30), default='running')
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OperationEvent(Base):
+    __tablename__ = 'operation_events'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    operation_id: Mapped[str] = mapped_column(ForeignKey('operations.id'), index=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
 engine = create_engine(config.DATABASE_URL, connect_args={'check_same_thread': False})
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 

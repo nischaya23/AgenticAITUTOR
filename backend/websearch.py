@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, unquote, urljoin, urlparse
 import httpx
 from pydantic import Field
 
-from . import config, prompts, utils, logging_setup as logs
+from . import config, prompts, utils, operations, logging_setup as logs
 
 # Wikimedia requires a descriptive User-Agent with a contact URL or address.
 USER_AGENT = f'StudyroomTutor/1.0 ({config.WEB_SEARCH_CONTACT}) python-httpx'
@@ -114,7 +114,7 @@ def duckduckgo_links(html: str) -> list[str]:
     return links
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str) -> dict | None:
+async def _fetch_page_content(client: httpx.AsyncClient, url: str) -> dict | None:
     for _ in range(4):
         if not await asyncio.to_thread(public_url, url):
             return None
@@ -138,6 +138,17 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> dict | None:
     return None
 
 
+async def _fetch_page(client, url):
+    await operations.progress('candidate', url=url, message='Checking public page and readable content.')
+    try:
+        page = await _fetch_page_content(client, url)
+    except (httpx.HTTPError, UnicodeError, ValueError):
+        page = None
+    await operations.progress('fetched' if page else 'rejected', url=url,
+        message='Readable content retrieved.' if page else 'Unavailable, unsupported, unsafe address, or insufficient readable content.')
+    return page
+
+
 async def _wikipedia(client: httpx.AsyncClient, query: str, limit: int) -> list[dict]:
     api = 'https://en.wikipedia.org/w/api.php'
     found = await client.get(api, params=dict(action='query', list='search', srsearch=query, format='json', srlimit=limit),
@@ -154,6 +165,8 @@ async def _wikipedia(client: httpx.AsyncClient, query: str, limit: int) -> list[
     docs = [dict(title=clean_title(page['title']), url=page.get('fullurl') or f"https://en.wikipedia.org/wiki/{page['title'].replace(' ', '_')}",
                  text=page.get('extract', '')[:MAX_DOC_CHARS])
             for page in pages.json().get('query', {}).get('pages', {}).values() if len(page.get('extract', '')) >= 400]
+    for doc in docs:
+        await operations.progress('candidate', title=doc['title'], url=doc['url'], message='Retrieved Wikipedia article text.')
     return sorted(docs, key=lambda d: order.get(d['title'], 99))
 
 
@@ -161,7 +174,7 @@ async def _duckduckgo(client: httpx.AsyncClient, query: str, limit: int) -> list
     response = await client.post('https://html.duckduckgo.com/html/', data={'q': query}, headers={'User-Agent': BROWSER_AGENT})
     response.raise_for_status()
     docs = []
-    for url in duckduckgo_links(response.text)[:limit * 3]:
+    for url in duckduckgo_links(response.text)[:limit]:
         try:
             page = await _fetch_page(client, url)
         except (httpx.HTTPError, UnicodeError, ValueError):
@@ -204,7 +217,12 @@ async def _gemini_search(query: str) -> list[dict]:
         raise WebSearchError('Gemini search returned no notes.')
     chunks = candidate.get('groundingMetadata', {}).get('groundingChunks', [])
     links = [dict(title=clean_title(c['web'].get('title', 'Web source')), url=c['web'].get('uri', '')) for c in chunks if c.get('web')]
-    return [dict(title=clean_title(f'Web notes - {query}'), url=links[0]['url'] if links else '', text=text[:MAX_DOC_CHARS], links=links)]
+    async with httpx.AsyncClient(timeout=config.WEB_SEARCH_TIMEOUT, follow_redirects=False) as client:
+        pages = await asyncio.gather(*[_fetch_page(client, link['url']) for link in links[:4]])
+    fetched = [p for p in pages if p]
+    if not fetched:
+        raise WebSearchError('Grounding links could not be retrieved as page evidence.')
+    return fetched
 
 
 class Meaning(utils.Schema):
@@ -217,13 +235,19 @@ class TopicMeanings(utils.Schema):
     meanings: list[Meaning] = Field(min_length=1, max_length=4)
 
 
+class SelectionReason(utils.Schema):
+    index: int = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=500)
+    quote: str = Field(max_length=700)
+
 class Relevance(utils.Schema):
     relevant: list[int] = Field(max_length=10)
+    decisions: list[SelectionReason] = Field(default_factory=list, max_length=10)
 
 
-async def interpret_topic(topic: str) -> list[Meaning]:
+async def interpret_topic(topic: str, learning_context=None) -> list[Meaning]:
     """The study meanings of a topic, most likely first; several only when it is ambiguous."""
-    result = await utils.call_llm(prompts.TOPIC_MEANINGS, {'topic': topic}, schema=TopicMeanings,
+    result = await utils.call_llm(prompts.TOPIC_MEANINGS, {'topic': topic, 'learning_context': learning_context or {}}, schema=TopicMeanings,
                                   operation='TOPIC_MEANINGS', max_output_tokens=600)
     return result.meanings
 
@@ -234,9 +258,19 @@ async def relevant_pages(pages: list[dict], subject: str) -> list[dict]:
         return []
     previews = [dict(index=i, title=page['title'], url=page['url'], start=page['text'][:700]) for i, page in enumerate(pages)]
     result = await utils.call_llm(prompts.PAGE_RELEVANCE, {'subject': subject, 'pages': previews}, schema=Relevance,
-                                  operation='PAGE_RELEVANCE', max_output_tokens=200)
+                                  operation='PAGE_RELEVANCE', max_output_tokens=min(3000,max(800,300*len(pages))))
     keep = {i for i in result.relevant if 0 <= i < len(pages)}
     logs.event('websearch.filtered', subject=subject[:200], kept=len(keep), dropped=[p['title'] for i, p in enumerate(pages) if i not in keep])
+    reasons = {d.index: d for d in result.decisions}
+    for i, page in enumerate(pages):
+        decision = reasons.get(i)
+        if decision and decision.quote and decision.quote not in page['text']:
+            keep.discard(i)
+            await operations.progress('rejected',title=page['title'],url=page['url'],reason='Selection evidence did not match the retrieved page.')
+            continue
+        await operations.progress('selected' if i in keep else 'rejected', title=page['title'], url=page['url'],
+            reason=decision.reason if decision else ('Relevant to requested subject.' if i in keep else 'Outside the requested subject.'),
+            quote=decision.quote if decision else '')
     return [page for i, page in enumerate(pages) if i in keep]
 
 
