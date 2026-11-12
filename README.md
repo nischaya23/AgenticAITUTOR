@@ -50,6 +50,8 @@ The Python backend coordinates preparation. During study, the orchestrator route
 - The Memory tab shows a read-only table of long-term memory by concept, including estimated mastery, summaries, possible gaps and next steps.
 - Visualizations show a graph with highlighted nodes, step explanations, and playback controls.
 
+![How the agents read and update session state, event history, and long-term learning memory in SQLite](docs/memory-flow.png)
+
 ## Observer
 
 The Observer Agent decides WAIT or WAKE using recent activity, help, and assessment evidence. A pause after an edit or inactivity can trigger a routine review. An incorrect assessment gets priority. Reviews run for active, unanswered questions with proactive help enabled and wait for in-flight teaching and grading.
