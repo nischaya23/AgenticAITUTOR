@@ -33,7 +33,7 @@
 
 ## Memory and scores
 
-Session memory lives in `sessions.state`. Long-term student memory lives in `student_state.data`. `memory_items` gives editable summaries, goals and misconceptions stable IDs, provenance and correction history. Events remain append-only. Preparation status and its associated chat live in `operations` and `operation_events`.
+Session memory lives in `sessions.state`. Long-term student memory lives in `student_state.data` and is organised by concept: `concept_memory` holds one rolling summary, next goal, attempt count, material ids and help-outcome notes per normalised concept name. The answer reflection rewrites that concept's summary (merging the previous, student-corrected one) instead of appending a new note; a short cross-concept `learner_profile` is updated only on clear evidence. Agents receive only memory in scope (`memory.scoped_long_term`): the planner gets every concept in the current material's graph, other agents the current concept and its direct prerequisites, and topic preparation only goals, the profile and known concept names. Legacy untagged notes are kept as `archived_notes`, visible in the Memory tab but never sent to a model. `memory_items` gives editable summaries, goals and misconceptions stable IDs, provenance and correction history. Events remain append-only. Preparation status and its associated chat live in `operations` and `operation_events`.
 
 Students can correct summaries and goals and dispute misconceptions. Grades, mastery, and history are read-only. Corrections use a memory revision to reject stale saves. Student goals survive later agent-generated goal updates.
 

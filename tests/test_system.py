@@ -39,12 +39,12 @@ def test_tables_fk_append_only_and_restart(app_env):
     assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges','logins','materials','memory_items','operations','operation_events','workflow_runs','workflow_spans','workflow_events','workflow_artifacts'}
     with factory.begin() as connection:
         row = connection.get(db.Session, sid)
-        memory.update_long_term_memory(connection, row.user_id, {'memories':['I prefer invariants.']})
+        memory.update_long_term_memory(connection, row.user_id, {'learner_profile':'I prefer invariants.'})
         memory.update_short_term_memory(connection, sid, {'workspace':'persistent work'})
     restarted = create_engine(engine.url)
     with DBSession(restarted) as connection:
         assert connection.get(db.Session, sid).state['workspace'] == 'persistent work'
-        assert connection.get(db.StudentState, row.user_id).data['memories'] == ['I prefer invariants.']
+        assert connection.get(db.StudentState, row.user_id).data['learner_profile'] == 'I prefer invariants.'
     restarted.dispose()
     for statement in ('DELETE FROM events', "UPDATE events SET type='changed'"):
         with pytest.raises(IntegrityError), engine.begin() as connection:
@@ -88,7 +88,8 @@ def test_explicit_websocket_ignores_proactive_preference(app_env):
     restored = client.get(f'/api/sessions/{sid}').json()
     assert restored['state']['plan']['steps']
     assert any(e['type']=='intervention' for e in restored['history'])
-    assert client.get('/api/student').json()['learning_goals']
+    student = client.get('/api/student').json()
+    assert 'learning_goals' not in student and 'concept_memory' in student  # Plan goals stay in the session plan.
 
 
 def test_disabled_observer_never_starts_agents(app_env, monkeypatch):
@@ -119,7 +120,8 @@ async def test_approved_help_reflection_and_mastery_persist(app_env):
         model = memory.get_long_term_memory(connection,row.user_id)
         assert model['mastery']['Binary Search'] == round(bkt_update(None, 1, True), 4)
         assert model['effective_interventions']['guiding_question'] == {'observations': 1, 'reward_sum': .5}
-        assert model['memories']
+        entry = model['concept_memory']['binary search']
+        assert entry['summary'] and any('Reward proxy' in note for note in entry['notes'])
         reflections = connection.scalars(select(db.Event).where(db.Event.type=='reflection')).all()
         assert next(r for r in reflections if 'reward' in r.data).data['reward'] == .5
         assert next(r for r in reflections if 'reward' in r.data).data['causal_claim'] is False
@@ -216,7 +218,7 @@ def test_legacy_policy_is_hidden_and_removed_on_memory_write(app_env):
         student.data={**student.data,'policy':{'updates':20}}
     assert 'policy' not in client.get('/api/student').json()
     with factory.begin() as connection:
-        memory.update_long_term_memory(connection,uid,{'learning_goals':['Practice']})
+        memory.update_long_term_memory(connection,uid,{'student_goals':['Practice']})
     with factory() as connection:
         assert 'policy' not in connection.get(db.StudentState,uid).data
 
@@ -300,7 +302,7 @@ def test_new_problem_and_session_reflection(app_env):
         result=receive_until(socket,'session_summary')
         assert result['result']['next_goal']
     assert client.get(f'/api/sessions/{sid}').json()['state']['ended']
-    assert not client.get('/api/student').json()['memories']
+    assert not client.get('/api/student').json()['concept_memory']
 
 
 async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypatch):

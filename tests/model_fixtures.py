@@ -67,7 +67,8 @@ async def mock_llm(instructions, data, schema=None, **kwargs):
         correct=(answer['text'] if isinstance(answer,dict) else answer).strip()=='1'
         return schema(correct=correct,score=float(correct),reason='Compared with reference.',misconceptions=[])
     if schema is reflection.SessionReflection:
-        return schema(summary='Practiced the concept.',next_goal='Check interval boundaries.')
+        return schema(summary='Practiced the concept.',next_goal='Check interval boundaries.',
+            concept_summary='Practiced the concept; boundaries still need care.')
     if schema is hypothesis.Analysis:
         return schema(hypotheses=[dict(id='boundary',concept='Binary Search',
             possible_gap='May need practice with interval boundaries.',confidence=.4,

@@ -177,7 +177,7 @@ def test_memory_activity_records_operations_without_contents(app_env):
             memory.get_short_term_memory(db,sid)
             memory.get_long_term_memory(db,row.user_id)
             memory.get_relevant_history(db,sid)
-            memory.update_long_term_memory(db,row.user_id,{'memories':['private learning detail']})
+            memory.update_long_term_memory(db,row.user_id,{'learner_profile':'private learning detail'})
     finally:
         activity.CURRENT.reset(token)
     assert any(i['kind']=='memory_read' for i in items)
@@ -215,7 +215,9 @@ async def test_grading_groups_activity_and_persists_reflection(app_env):
     assert activity[0]['items'][0]['operation']=='Answer assessment'
     with factory() as db:
         model=memory.get_long_term_memory(db,db.get(Session,sid).user_id)
-        assert model['memories'] and model['learning_goals']
+        entry=model['concept_memory']['binary search']
+        assert entry['summary'] and entry['next_goal'] and entry['attempts']==1
+        assert 'memories' not in model and 'learning_goals' not in model
 
 
 @pytest.mark.parametrize('correct', [False, True])

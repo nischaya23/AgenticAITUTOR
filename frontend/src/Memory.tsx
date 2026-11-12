@@ -38,7 +38,7 @@ export default function MemoryPanel({sessionId,active,version}: {sessionId:numbe
       <button disabled={busy || !text.trim()}>Save</button><button type="button" onClick={()=>setEditing(null)}>Cancel</button>
     </form>;
   }
-  function items(kind:string) {
+  function items(kind:string, readOnly=false) {
     const entries=memory?.items.filter(item=>item.kind===kind) ?? [];
     return entries.length ? <ul>{entries.map(item=><li key={item.id}>
       <p>{item.effective_text}</p>{item.concept && <small>{item.concept}</small>}
@@ -47,7 +47,7 @@ export default function MemoryPanel({sessionId,active,version}: {sessionId:numbe
         {item.source_event_id ? ' · Evidence event '+item.source_event_id : ' · Earlier evidence reference unavailable'}</p>
       <details><summary>Original and correction history</summary><p>{item.original_text}</p>
         <ul>{item.edits.map((edit,i)=><li key={i}>{new Date(edit.at).toLocaleString()}: {edit.text}</li>)}</ul></details>
-      {editing===item.id ? editor(item) : <button type="button" disabled={busy} onClick={()=>{
+      {readOnly ? null : editing===item.id ? editor(item) : <button type="button" disabled={busy} onClick={()=>{
         setEditing(item.id);setText(item.kind==='misconception' ? item.student_note : item.effective_text);
       }}>{kind==='misconception' ? 'Dispute' : 'Correct'}</button>}
     </li>)}</ul> : <p className="muted">Nothing saved yet.</p>;
@@ -68,9 +68,11 @@ export default function MemoryPanel({sessionId,active,version}: {sessionId:numbe
       <h4>Your learning goals</h4>{items('student_goal')}
       {editing==='new' ? editor() : <button type="button" onClick={()=>{setEditing('new');setText('');}}>Add learning goal</button>}
       <h4>Suggested next goals</h4>{items('agent_goal')}
-      <h4>Saved reflections</h4>{items('summary')}
+      <h4>Concept summaries</h4><p className="muted">One rolling summary per concept, rewritten after each graded answer. Only the concepts in your current study map are shared with the tutor.</p>{items('summary')}
+      <h4>Learner profile</h4>{items('profile')}
       <h4>Assessed learning hypotheses</h4><Hypotheses state={{status:'ready',items:memory.long_term.hypotheses,origin:'submission'}} />
       <h3>Possible misconceptions</h3><p>These are provisional observations. Add a dispute if the evidence misrepresents your understanding.</p>{items('misconception')}
+      {!!memory.items.some(item=>item.kind==='archived') && <details><summary>Archived notes (not shared with the tutor)</summary>{items('archived', true)}</details>}
     </>}
   </section>;
 }

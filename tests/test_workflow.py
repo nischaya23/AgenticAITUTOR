@@ -115,18 +115,18 @@ def test_memory_updates_and_artifacts_commit_or_rollback_together(app_env):
     sid = session(client)
     with workflow.run('Memory correction', session_id=sid) as trace:
         with pytest.raises(ValueError), factory.begin() as conn:
-            memory.update_long_term_memory(conn, 1, {'memories':['ROLLBACK VALUE']})
+            memory.update_long_term_memory(conn, 1, {'learner_profile':'ROLLBACK VALUE'})
             raise ValueError('rollback')
         before = get_detail(client, trace.run_id)
         assert not any(e['type'] == 'memory.committed' for e in before['events'])
         with factory.begin() as conn:
-            memory.update_long_term_memory(conn, 1, {'memories':['Committed value']})
+            memory.update_long_term_memory(conn, 1, {'learner_profile':'Committed value'})
             # A second connection cannot see the update card before commit.
             assert not any(e['type'] == 'memory.committed' for e in get_detail(client, trace.run_id)['events'])
     detail = get_detail(client, trace.run_id)
     changes = artifacts(client, detail, 'memory_change')
     assert len(changes) == 1
-    assert changes[0]['after']['memories'] == ['Committed value']
+    assert changes[0]['after']['learner_profile'] == 'Committed value'
     assert 'ROLLBACK VALUE' not in json.dumps(detail)
     before_count = len(detail['events'])
     client.get(f'/api/sessions/{sid}/memory')
@@ -134,7 +134,7 @@ def test_memory_updates_and_artifacts_commit_or_rollback_together(app_env):
     assert len(get_detail(client, trace.run_id)['events']) == before_count
     # Snapshots are immutable when a later update occurs.
     with factory.begin() as conn:
-        memory.update_long_term_memory(conn, 1, {'memories':['Later memory']})
+        memory.update_long_term_memory(conn, 1, {'learner_profile':'Later memory'})
     assert artifacts(client, get_detail(client, trace.run_id), 'memory_change') == changes
 
 

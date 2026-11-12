@@ -2,7 +2,7 @@
 from . import workflow, prompts, utils
 from .activity import record
 from .db import append_event
-from .memory import get_long_term_memory, update_long_term_memory
+from .memory import add_concept_note, get_long_term_memory, update_long_term_memory
 
 def reflect_on_intervention(db, session_id: int, user_id: int, state: dict, evidence: dict, evidence_id: int) -> dict | None:
     o = dict(state.get('observer', {}))
@@ -31,7 +31,12 @@ def reflect_on_intervention(db, session_id: int, user_id: int, state: dict, evid
         bucket['observations'] += 1
         bucket['reward_sum'] += reward
         successes[kind] = bucket
-        update_long_term_memory(db, user_id, {'effective_interventions': successes, 'memories': data['memories'] + [f'{kind}: {reason} Reward proxy {reward}; evidence event {evidence_id}.']})
+        updates = {'effective_interventions': successes}
+        if state.get('current_concept'):
+            # Help outcomes are remembered on the concept they happened in, not in a global list.
+            add_concept_note(data, state['current_concept'], f'{kind}: {reason} Reward proxy {reward}; evidence event {evidence_id}.')
+            updates['concept_memory'] = data['concept_memory']
+        update_long_term_memory(db, user_id, updates)
     entry = append_event(db, session_id, 'reflection', dict(intervention_id=pending.get('event_id'), evidence_event_id=evidence_id, reward=reward, evidence=reason, causal_claim=False, action=pending['action']))
     o.pop('pending_intervention', None)
     state['observer'] = o
@@ -40,8 +45,17 @@ def reflect_on_intervention(db, session_id: int, user_id: int, state: dict, evid
 class SessionReflection(utils.Schema):
     summary: str
     next_goal: str
+    concept_summary: str = ''
+    profile_note: str = ''
 
 @workflow.stage('Reflection · Review assessment', 'agents')
 async def reflect_on_answer(context: dict, assessment: dict) -> dict:
     record('reflection', 'Reflecting on the answer and prior help; LLM-based conclusions remain tentative.')
-    return (await utils.call_llm(prompts.REFLECT_ON_ANSWER, {'context': context, 'assessment': assessment}, schema=SessionReflection, operation='REFLECT_ON_ANSWER')).model_dump()
+    student = context.get('student', {})
+    prior = student.get('concept_memory', {}).get(utils.normalize_concept(context.get('concept')), {})
+    payload = {'context': context, 'assessment': assessment,
+               'prior_concept_summary': prior.get('summary', ''), 'learner_profile': student.get('learner_profile', '')}
+    result = (await utils.call_llm(prompts.REFLECT_ON_ANSWER, payload, schema=SessionReflection, operation='REFLECT_ON_ANSWER')).model_dump()
+    # Never lose the concept summary if the model leaves it empty.
+    result['concept_summary'] = result['concept_summary'].strip() or ' '.join(filter(None, [prior.get('summary', ''), result['summary']]))
+    return result

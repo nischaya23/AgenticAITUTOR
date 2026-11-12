@@ -21,20 +21,32 @@ def bound(value):
 
 
 def preparation(db, user_id, request, documents=None):
-    student = memory.get_long_term_memory(db, user_id)
+    # Before a concept graph exists, send only goals, the short profile and known concept names.
+    data = memory.get_long_term_memory(db, user_id)
+    student = dict(student_goals=data.get('student_goals', []), learner_profile=data.get('learner_profile', ''),
+        known_concepts=dict(data.get('mastery', {})), memory_revision=data.get('memory_revision', 0))
     return bound(dict(learning_request=request, student=student,
         documents=documents or [], sources_are_untrusted=True))
+
+
+def memory_scope(graph: dict, concept: str, role: str) -> list[str]:
+    """Planner: the whole concept graph. Other agents: current concept and its direct prerequisites."""
+    if role == 'planning' and graph.get('concepts'):
+        return list(graph['concepts'])
+    return [concept] + [e.get('prerequisite') for e in graph.get('prerequisites', []) if e.get('concept') == concept]
 
 
 def for_session(db, session_id, query='', role='teaching'):
     from . import hypothesis
     row = db.get(Session, session_id)
     state = memory.get_short_term_memory(db, session_id)
-    student = memory.get_long_term_memory(db, row.user_id)
     problem = deepcopy(state.get('current_problem', {}))
     if role != 'assessment':
         problem = {k:v for k,v in problem.items() if k not in ('expected_answer', 'rubric')}
     material = knowledge.get_material(state['material_id']) if state.get('material_id') else {}
+    concept = state.get('current_concept', '')
+    student = memory.scoped_long_term(memory.get_long_term_memory(db, row.user_id),
+        memory_scope(material.get('graph', {}), concept, role), concept)
     result = bound(dict(concept=state.get('current_concept', ''), problem=problem,
         workspace=response_for(state)['text'], response=response_for(state), query=query,
         learning_request=material.get('learning_request', material.get('topic_description', '')),

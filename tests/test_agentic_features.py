@@ -26,7 +26,8 @@ def test_memory_corrections_persist_and_feed_context(app_env):
     client,factory,_=app_env
     sid,_,_=prepare(client)
     with factory.begin() as db:
-        memory.update_long_term_memory(db,1,dict(memories=['Original summary'],learning_goals=['Agent goal'],
+        memory.update_long_term_memory(db,1,dict(concept_memory={'binary search':dict(name='Binary Search',
+            summary='Original summary',next_goal='Agent goal')},
             misconceptions=[dict(concept='Binary Search',hypothesis='Confuses boundaries',evidence_event_id=1,status='unconfirmed')]))
     snapshot=client.get(f'/api/sessions/{sid}/memory').json()
     assert 'expected_answer' not in json.dumps(snapshot) and 'policy' not in json.dumps(snapshot)
@@ -42,9 +43,8 @@ def test_memory_corrections_persist_and_feed_context(app_env):
     response=client.post(f'/api/sessions/{sid}/memory/corrections',json=dict(expected_revision=snapshot['revision'],action='dispute',item_id=misconception['id'],text='I meant the inclusive boundary.'))
     assert response.status_code==200,response.text
     with factory.begin() as db:
-        memory.update_long_term_memory(db,1,{'learning_goals':['A newer agent goal']})
         learning=context.for_session(db,sid)
-        assert learning['student']['memories']==['Corrected summary']
+        assert learning['student']['concept_memory']['binary search']['summary']=='Corrected summary'
         assert learning['student']['student_goals']==['My own priority']
         assert learning['student']['misconceptions'][0]['status']=='disputed'
         assert 'inclusive boundary' in learning['student']['misconceptions'][0]['student_note']

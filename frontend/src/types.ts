@@ -65,4 +65,7 @@ export type MemoryItem = { id: string; kind: string; original_text: string; effe
   edits: {at: string; action: string; before: string; text: string}[] };
 export type MemorySnapshot = { revision: number; short_term: { concept?: string; question?: string; response: Response;
   plan: Partial<LearningPlan>; assessment?: Assessment; hypotheses?: HypothesisState; assessment_pending: boolean };
-  long_term: {mastery: Record<string,number>; hypotheses: Hypothesis[]}; items: MemoryItem[] };
+  long_term: {mastery: Record<string,number>; hypotheses: Hypothesis[]; learner_profile?: string;
+    archived_notes?: string[]; concept_memory?: Record<string, ConceptMemory>}; items: MemoryItem[] };
+export type ConceptMemory = { name: string; summary: string; next_goal: string; attempts: number;
+  material_ids: string[]; notes: string[]; evidence_event_ids: number[]; updated_at?: string | null };

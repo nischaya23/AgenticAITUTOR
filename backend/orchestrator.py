@@ -7,9 +7,9 @@ from .logging_setup import event as log_event
 from .db import Event, Session, append_event
 
 
-def context_for(db, session_id: int, query: str = '') -> dict:
+def context_for(db, session_id: int, query: str = '', role: str = 'teaching') -> dict:
     from .context import for_session
-    return for_session(db, session_id, query)
+    return for_session(db, session_id, query, role)
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):
@@ -137,7 +137,8 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
             return None
         snapshot = state['revision']
         needs_plan = not state.get('plan', {}).get('steps')
-    plan = await planner.create_learning_plan(context) if needs_plan else context['plan']
+        planning_context = context_for(db, sid, job['content'], role='planning') if needs_plan else None
+    plan = await planner.create_learning_plan(planning_context) if needs_plan else context['plan']
     context['plan'] = plan
     from . import research, knowledge
     from . import operations
@@ -196,10 +197,6 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
             current['plan'] = plan
             current['plan_version'] = current.get('plan_version', 0)+1
         memory.update_short_term_memory(db, sid, current)
-        if needs_plan:
-            model = memory.get_long_term_memory(db, row.user_id)
-            memory.update_long_term_memory(db, row.user_id,
-                {'learning_goals': list(dict.fromkeys(model['learning_goals'] + plan['learning_goals']))[-10:]})
         utils.METRICS['interventions'] += 1
         utils.METRICS['proactive_interventions' if not explicit else 'explicit_interventions'] += 1
         return {'type': 'intervention', 'event_id': entry.id, 'proactive': not explicit,
@@ -265,8 +262,10 @@ async def _assess(job):
             return [{'type': 'assessment', 'event_id': evidence_id, 'result': result}]
         if summary:
             model = memory.get_long_term_memory(db, row.user_id)
-            memory.update_long_term_memory(db, row.user_id, {'memories': model['memories']+[summary['summary']],
-                'learning_goals': [summary['next_goal']]}, evidence_id=evidence_id)
+            memory.record_concept_reflection(model, job['concept'], summary.get('concept_summary') or summary['summary'], summary['next_goal'],
+                state.get('material_id'), evidence_id, summary.get('profile_note', ''))
+            memory.update_long_term_memory(db, row.user_id, {'concept_memory': model['concept_memory'],
+                'learner_profile': model['learner_profile']}, evidence_id=evidence_id)
             append_event(db, sid, 'reflection', {**summary, 'scope': 'answer', 'tentative': not result['verified'], 'evidence_event_id': evidence_id})
         state['assessment_stages'] = {'reflection': 'ready' if summary else 'unavailable', 'hypotheses': 'analyzing'}
         memory.update_short_term_memory(db, sid, state)
@@ -330,7 +329,7 @@ async def _handle(job: dict) -> list[dict]:
         outputs.extend(await _assess(job))
     if job['replan']:
         with SessionLocal() as db:
-            context = context_for(db, sid)
+            context = context_for(db, sid, role='planning')
             revision = db.get(Session, sid).state['revision']
         plan = await planner.revise_plan(context)
         with SessionLocal.begin() as db:
