@@ -6,7 +6,7 @@ The application uses FastAPI, React/TypeScript, SQLite, and the configured OpenA
 
 ## Run
 
-Use Python 3.11+ and Node.js 20.19+ or 22.12+. Install FFmpeg and DejaVu fonts on the machine for local video rendering. Pillow is included in the Python requirements. The video worker uses POSIX resource limits; Docker is not used.
+Use Python 3.11+ and Node.js 20.19+ or 22.12+. Pillow and a bundled FFmpeg binary are included in the Python requirements for local video rendering; no system FFmpeg install or DejaVu font is required. POSIX resource limits are applied where supported. Docker is not used.
 
 ```bash
 python -m venv .venv

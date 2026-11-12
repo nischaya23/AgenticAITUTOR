@@ -60,6 +60,15 @@ def directory(user_id):
 
 _LOCKS = {}
 
+
+def _ffmpeg_executable():
+    import importlib.util
+    if importlib.util.find_spec('imageio_ffmpeg') is None:
+        raise ValueError('Video renderer unavailable. Install the project requirements.')
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 @workflow.stage('Visualization · Render video', 'tools')
 async def render(script: VideoScript, user_id):
     identity=(asyncio.get_running_loop(),str(config.DATA_DIR),user_id,script.model_dump_json())
@@ -68,10 +77,10 @@ async def render(script: VideoScript, user_id):
         return await _render(script,user_id)
 
 async def _render(script: VideoScript, user_id):
-    import shutil
     import importlib.util
-    if not shutil.which('ffmpeg') or importlib.util.find_spec('PIL') is None:
-        raise ValueError('Video renderer unavailable. Install Pillow and FFmpeg locally.')
+    if importlib.util.find_spec('PIL') is None:
+        raise ValueError('Video renderer unavailable. Install Pillow.')
+    ffmpeg_executable = _ffmpeg_executable()
     key = hashlib.sha256(json.dumps(dict(script=script.model_dump(), renderer='pillow-v1',
         width=960, height=540, fps=15), sort_keys=True).encode()).hexdigest()
     folder = directory(user_id) / key
@@ -81,10 +90,13 @@ async def _render(script: VideoScript, user_id):
         await operations.progress('cache_hit', message='Reused the rendered video from cache.')
         return key
     (folder / 'script.json').write_text(script.model_dump_json())
-    command = [sys.executable, '-I', str(Path(__file__).with_name('renderer_worker.py')), str(folder.resolve())]
+    command = [sys.executable, '-I', str(Path(__file__).with_name('renderer_worker.py')),
+        str(folder.resolve()), ffmpeg_executable]
     await operations.progress('rendering', message='Rendering animation frames and encoding video.')
     started = time.monotonic()
-    process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, start_new_session=True,
+    process_options = {'start_new_session': True} if os.name != 'nt' else {}
+    process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        **process_options,
         env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'LANG':'C.UTF-8','OPENBLAS_NUM_THREADS':'1','OMP_NUM_THREADS':'1'})
     try:
         _, stderr = await asyncio.wait_for(process.communicate(), 60)
@@ -99,9 +111,12 @@ async def _render(script: VideoScript, user_id):
         utils.METRICS['video_renders'] += 1
         return key
     except (asyncio.CancelledError, TimeoutError):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if os.name == 'nt':
+            process.kill()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         await process.wait()
         raise

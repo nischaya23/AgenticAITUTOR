@@ -3,9 +3,12 @@ import json
 import math
 import subprocess
 import sys
-import resource
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+try:
+    import resource
+except ImportError:
+    resource = None
 sys.path.insert(0,str(Path(__file__).parent))
 from drawing_script import DrawingScript
 
@@ -16,7 +19,10 @@ class Canvas:
         self.draw = ImageDraw.Draw(image)
     def text(self, x, y, text, size=24, color='#ffffff'):
         size = max(8, min(80, int(size)))
-        font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', size)
+        try:
+            font = ImageFont.truetype('DejaVuSans.ttf', size)
+        except OSError:
+            font = ImageFont.load_default(size=size)
         self.draw.multiline_text((x,y), str(text)[:1200], font=font, fill=color, spacing=6)
     def rect(self, x,y,w,h,color='#365c37'):
         self.draw.rounded_rectangle((x,y,x+w,y+h), radius=6, fill=color)
@@ -38,7 +44,7 @@ class Canvas:
         u=max(0,min(1,u)); return u*u*(3-2*u)
 
 
-def main(folder=Path('/job')):
+def main(folder, ffmpeg_executable):
     spec=json.loads((folder/'script.json').read_text())
     duration=max(2,min(30,float(spec['duration'])))
     program=DrawingScript(spec['code'])
@@ -47,7 +53,7 @@ def main(folder=Path('/job')):
     for t in (0,duration/2,max(0,duration-1/FPS)):
         function(Canvas(Image.new('RGB',(WIDTH,HEIGHT),'#172526')),t)
     temporary=folder/'rendering.mp4'
-    command=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','rawvideo','-pix_fmt','rgb24',
+    command=[ffmpeg_executable,'-hide_banner','-loglevel','error','-y','-f','rawvideo','-pix_fmt','rgb24',
         '-s',f'{WIDTH}x{HEIGHT}','-r',str(FPS),'-i','pipe:0','-an','-c:v','libx264',
         '-preset','ultrafast','-crf','23','-threads','2','-pix_fmt','yuv420p',
         '-movflags','+faststart','-fs',str(20*1024*1024),str(temporary)]
@@ -64,8 +70,9 @@ def main(folder=Path('/job')):
     temporary.replace(folder/'video.mp4')
 
 if __name__=='__main__':
-    resource.setrlimit(resource.RLIMIT_CPU,(45,45))
-    resource.setrlimit(resource.RLIMIT_AS,(512*1024*1024,512*1024*1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE,(20*1024*1024,20*1024*1024))
-    resource.setrlimit(resource.RLIMIT_NOFILE,(64,64))
-    main(Path(sys.argv[1]))
+    if resource is not None:
+        resource.setrlimit(resource.RLIMIT_CPU,(45,45))
+        resource.setrlimit(resource.RLIMIT_AS,(512*1024*1024,512*1024*1024))
+        resource.setrlimit(resource.RLIMIT_FSIZE,(20*1024*1024,20*1024*1024))
+        resource.setrlimit(resource.RLIMIT_NOFILE,(64,64))
+    main(Path(sys.argv[1]), sys.argv[2])

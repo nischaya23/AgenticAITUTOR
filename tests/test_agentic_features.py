@@ -256,16 +256,17 @@ def test_drawing_interpreter_blocks_execution_and_bounds_work():
 
 
 async def test_local_video_render_codec_cache_and_account_scoping(tmp_path,monkeypatch):
-    if not shutil.which('ffmpeg') or not shutil.which('ffprobe'): pytest.skip('FFmpeg is required for renderer integration.')
+    ffmpeg=video._ffmpeg_executable()
     monkeypatch.setattr(config,'DATA_DIR',tmp_path)
     spec=video.VideoScript(title='Interval',content='Shrink the interval.',concept='Search',duration=2,
         code="def draw_frame(canvas, t):\n    canvas.text(40, 40, 'Narrow the interval')\n    canvas.circle(canvas.lerp(100, 800, t / 2), 220, 20)",
         chapters=[dict(start=0,end=2,text='Narrow the interval.')])
     key=await video.render(spec,1)
     path=video.directory(1)/key/'video.mp4'
-    metadata=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=codec_name,width,height,pix_fmt','-show_entries','format=duration','-of','json',str(path)]))
-    assert metadata['streams'][0]==dict(codec_name='h264',width=960,height=540,pix_fmt='yuv420p')
-    assert float(metadata['format']['duration'])==2
+    metadata=subprocess.run([ffmpeg,'-hide_banner','-i',str(path)],capture_output=True,text=True,check=False)
+    assert 'Video: h264' in metadata.stderr
+    assert '960x540' in metadata.stderr and 'yuv420p' in metadata.stderr
+    assert 'Duration: 00:00:02' in metadata.stderr
     changed=path.stat().st_mtime_ns
     assert await video.render(spec,1)==key and path.stat().st_mtime_ns==changed
     assert not (video.directory(2)/key/'video.mp4').exists()
@@ -292,7 +293,7 @@ async def test_provider_adapters_preserve_native_tool_history(monkeypatch,provid
 
 
 def test_visualization_job_delivers_seekable_video_and_captions(app_env):
-    if not shutil.which('ffmpeg'): pytest.skip('FFmpeg required.')
+    video._ffmpeg_executable()
     client,_,_=app_env
     sid,_,_=prepare(client)
     with client.websocket_connect(f'/ws/{sid}') as socket:
