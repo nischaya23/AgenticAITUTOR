@@ -70,7 +70,7 @@ async def mock_llm(instructions, data, schema=None, **kwargs):
         return schema(summary='Practiced the concept.',next_goal='Check interval boundaries.',
             concept_summary='Practiced the concept; boundaries still need care.')
     if schema is hypothesis.Analysis:
-        return schema(hypotheses=[dict(id='boundary',concept='Binary Search',
+        return schema(hypotheses=[dict(id='boundary',concept=data['context']['concept'],
             possible_gap='May need practice with interval boundaries.',confidence=.4,
             evidence=[dict(reference=data['evidence_references'][-1],summary='The response discusses search boundaries.')],
             diagnostic_focus='Explain why the interval contains the first match.',status='tentative')])

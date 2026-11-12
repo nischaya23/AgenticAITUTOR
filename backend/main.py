@@ -127,7 +127,7 @@ def observer_status(state):
 
 
 def public_state(state: dict) -> dict:
-    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k not in ('observer', 'log_uuid', 'submitted_response')},
+    return {'observer_status': observer_status(state), **{k: v for k, v in state.items() if k not in ('observer', 'log_uuid', 'submitted_response', 'assessed_hypotheses')},
         'response': response_for(state), 'response_revision': state.get('response_revision', 0),
         'hypothesis_state': hypothesis.view(state),
         'current_problem': {k: v for k, v in state.get('current_problem', {}).items()
@@ -252,7 +252,6 @@ def create_session(request: Request, body: CreateSessionRequest | None = None):
                 if row is not None and row.user_id == user_id:
                     return {'id': row.id, 'state': public_state(row.state)}
         state = utils.SessionData(log_uuid=uuid4().hex).model_dump(mode='json')
-        state['assessed_hypotheses'] = memory.get_long_term_memory(db, user_id).get('hypotheses', [])
         row = Session(user_id=user_id, state=state)
         db.add(row)
         db.flush()
@@ -333,12 +332,12 @@ async def _new_problem(session_id: int, request: ProblemRequest):
         if initial['ended']:
             raise HTTPException(409, 'Start a new session first.')
         revision = initial['revision']
-        question_context = context.for_session(db, session_id)
+        question_context = context.for_session(db, session_id, concept=request.concept)
     try:
         sources = knowledge.retrieve_knowledge(request.concept, user_id=user_id)
-        question_context.update(concept=request.concept,knowledge=sources)
+        question_context['knowledge'] = sources
         problem = await tools.generate_problem(request.concept, learning_context=question_context, sources=sources, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
-            hypotheses=hypothesis.eligible(initial), hypothesis_version=initial.get('hypothesis_state', {}).get('version', 0),
+            hypotheses=question_context['hypotheses'], hypothesis_version=question_context['snapshot']['hypothesis_version'],
             recent_formats=initial.get('recent_formats', []), previous_prompts=initial.get('recent_questions', []))
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -353,7 +352,8 @@ async def _new_problem(session_id: int, request: ProblemRequest):
                      plan=state.get('plan', {}) if state.get('material_id') else {},
                      revision=state['revision']+1, observer={})
         orchestrator.persist_observation(db, row, state, 'student_action', {'action': 'problem_opened'})
-        append_event(db, session_id, 'student_action', {'action': 'problem_opened', 'problem_id': problem['id']})
+        append_event(db, session_id, 'student_action', {
+            'action': 'problem_opened', 'problem_id': problem['id'], 'concept': request.concept})
         result = {'type': 'state', 'state': public_state(state)}
     if DRAFTS:
         DRAFTS.cancel(session_id)
@@ -558,9 +558,10 @@ async def advance_study(session_id: int, chosen: str | None = None) -> dict | No
         if state.get('ended'):
             return study_snapshot(db, session_id)
         material = knowledge.get_material(state['material_id'])
-        question_context = context.for_session(db, session_id)
         mastery = memory.get_mastery(db, row.user_id)
         concept = chosen or select_study_concept(material['graph'], mastery, state.get('focus_concept'))
+        if concept is not None:
+            question_context = context.for_session(db, session_id, concept=concept)
         focus = concept if concept in (chosen, state.get('focus_concept')) else None
         revision = state['revision']
         recent = state.get('recent_questions', [])
@@ -572,12 +573,11 @@ async def advance_study(session_id: int, chosen: str | None = None) -> dict | No
                 return None
             memory.update_short_term_memory(db, session_id, {'study_complete': True})
             return study_snapshot(db, session_id)
-    question_context['concept']=concept
     sources = await study_sources(material, concept, question_context)
     question_context.update(knowledge=sources,previous_problem=question_context.pop('problem',{}),previous_response=question_context.pop('response',{}))
     question_context.pop('workspace',None)
     problem = await tools.generate_problem(concept, learning_context=question_context, sources=sources, previous_prompts=recent, plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
-        hypotheses=hypothesis.eligible(state), hypothesis_version=state.get('hypothesis_state', {}).get('version', 0),
+        hypotheses=question_context['hypotheses'], hypothesis_version=question_context['snapshot']['hypothesis_version'],
         eligible_concepts=eligible, recent_formats=state.get('recent_formats', []))
     with SessionLocal.begin() as db:
         row = require_session(db, session_id)

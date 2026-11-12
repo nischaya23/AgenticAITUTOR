@@ -76,7 +76,8 @@ def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
     if event.type == 'session_end':
         state['ended'] = True
     received_at = utils.now()
-    entry = append_event(db, session_id, event.type, {**data, 'revision': state['revision'], 'received_at': received_at})
+    entry = append_event(db, session_id, event.type, {**data, 'revision': state['revision'],
+        'received_at': received_at, 'concept': state['current_concept']})
     if draft_changed:
         state['last_draft_event_id'] = entry.id
     if event.type == 'problem_attempt':
@@ -183,7 +184,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
                                            'result': result})
         entry = append_event(db, sid, 'intervention', {**result, 'proactive': not explicit,
                              'trigger_event_id': job['event_id'], 'revision': current['revision'],
-                             'problem_id': current['current_problem']['id']})
+                             'problem_id': current['current_problem']['id'], 'concept': job['concept']})
         o = current['observer']
         o['last_intervention_at'] = utils.now()
         previous = o.pop('pending_intervention', None)
@@ -215,7 +216,7 @@ async def _assess(job):
         # The submission snapshot is authoritative even if the student continues editing.
         context.update(response=job['response'], workspace=job['response']['text'])
         context['snapshot']['response_revision'] = job['response_revision']
-        prior = hypothesis.eligible(state)
+        prior = context['hypotheses']
     result = await assessment.evaluate_attempt(job['problem'],
         job['response'] if job['unified'] else job['content'], context,
         job.get('assessment_mode') == 'reasoning')
@@ -226,7 +227,7 @@ async def _assess(job):
             workflow.outcome('discarded', 'Submission question or plan changed', db=db)
             return []
         entry = append_event(db, sid, 'assessment', {**result, 'trigger_event_id': job['event_id'],
-            'response': job['response'], 'response_revision': job['response_revision']})
+            'response': job['response'], 'response_revision': job['response_revision'], 'concept': job['concept']})
         evidence_id = entry.id
         student_model.update_mastery(db, row.user_id, job['concept'], result['score'], entry.id, result['verified'])
         student_model.update_misconceptions(db, row.user_id, job['concept'], assessment.diagnose_misconception(result), entry.id)
@@ -280,7 +281,7 @@ async def _assess(job):
     except Exception as exc:
         log_event('hypothesis.failed', session_id=sid, origin='submission', error=type(exc).__name__)
         workflow.record('hypothesis.fallback', 'errors', 'warnings', message='Submission hypothesis analysis unavailable; prior hypotheses retained')
-        items, status, error = state.get('assessed_hypotheses', []), 'unavailable', 'Submission analysis unavailable; using prior hypotheses.'
+        items, status, error = context['student']['hypotheses'], 'unavailable', 'Submission analysis unavailable; using prior hypotheses.'
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
         state = deepcopy(row.state)
@@ -290,14 +291,17 @@ async def _assess(job):
             log_event('hypothesis.discarded', session_id=sid, origin='submission')
             return [{'type': 'assessment', 'event_id': evidence_id, 'result': result}]
         snapshot = {**state, 'response_revision': job['response_revision']}
-        panel = hypothesis.panel_for(snapshot, items, 'submission', status, error=error)
+        panel = hypothesis.panel_for(snapshot, items, 'submission', status,
+                                     concept_scope=context['hypothesis_scope'], error=error)
         state.update(hypothesis_state=panel, assessment_pending=False,
             assessment_stages={'reflection': 'ready' if summary else 'unavailable', 'hypotheses': status})
         if status == 'ready':
-            state['assessed_hypotheses'] = items
             state['assessed_hypothesis_version'] = panel['version']
+            items = panel['items']
             workflow.version_artifact('hypotheses', items, panel['version'], 'produced', db=db)
-            memory.update_long_term_memory(db, row.user_id, {'hypotheses': items})
+            student = memory.get_long_term_memory(db, row.user_id)
+            saved = memory.merge_assessed_hypotheses(student['hypotheses'], job['concept'], items)
+            memory.update_long_term_memory(db, row.user_id, {'hypotheses': saved})
             append_event(db, sid, 'hypotheses', {'items': items, 'evidence_event_id': evidence_id,
                 'question_id': panel['question_id'], 'plan_version': panel['plan_version']})
         memory.update_short_term_memory(db, sid, state)

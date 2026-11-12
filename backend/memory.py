@@ -10,6 +10,20 @@ CONCEPT_NOTES = 5
 CONCEPT_EVIDENCE = 10
 ARCHIVED_NOTES = 50
 PROFILE_CHARS = 600
+HYPOTHESES_PER_CONCEPT = 8
+
+
+def hypotheses_for_concepts(items, concepts) -> list[dict]:
+    wanted = {normalize_concept(name) for name in concepts if name}
+    return [item for item in items if normalize_concept(item.get('concept')) in wanted]
+
+
+def merge_assessed_hypotheses(existing, concept, assessed) -> list[dict]:
+    groups = {normalize_concept(concept): []}
+    for item in assessed:
+        groups.setdefault(normalize_concept(item['concept']), []).append(item)
+    retained = [item for item in existing if normalize_concept(item.get('concept')) not in groups]
+    return retained + [item for group in groups.values() for item in group[:HYPOTHESES_PER_CONCEPT]]
 
 
 def migrate_legacy(data: dict) -> dict:
@@ -59,11 +73,14 @@ def scoped_long_term(data: dict, concepts, primary: str | None = None) -> dict:
     keys = list(dict.fromkeys(keys))
     wanted = set(keys)
     memories = data.get('concept_memory', {})
+    hypotheses = hypotheses_for_concepts(data.get('hypotheses', []), keys)
+    priority = {key: index for index, key in enumerate(keys)}
+    hypotheses.sort(key=lambda item: priority[normalize_concept(item['concept'])])
     return dict(
         mastery={k: v for k, v in data.get('mastery', {}).items() if normalize_concept(k) in wanted},
         concept_memory={k: memories[k] for k in keys if k in memories},
         misconceptions=[m for m in data.get('misconceptions', []) if normalize_concept(m.get('concept')) in wanted],
-        hypotheses=[h for h in data.get('hypotheses', []) if normalize_concept(h.get('concept')) in wanted],
+        hypotheses=hypotheses[:HYPOTHESES_PER_CONCEPT],
         student_goals=list(data.get('student_goals', [])),
         learner_profile=data.get('learner_profile', ''),
         effective_interventions=deepcopy(data.get('effective_interventions', {})),
@@ -138,9 +155,25 @@ def update_long_term_memory(db, user_id: int, updates: dict, evidence_id: int | 
     return deepcopy(data)
 
 
-def get_relevant_history(db, session_id: int, limit: int = 20) -> list[dict]:
-    rows = db.scalars(select(Event).where(Event.session_id == session_id, Event.type.in_(['student_message', 'problem_attempt', 'intervention', 'assessment', 'feedback', 'memory_correction']))
-                      .order_by(Event.id.desc()).limit(min(limit, 100))).all()
+def get_relevant_history(db, session_id: int, limit: int = 20, *, concepts=None) -> list[dict]:
+    kinds = ['student_message', 'problem_attempt', 'intervention', 'assessment', 'feedback']
+    if concepts is None:
+        kinds.append('memory_correction')
+    relevant = Event.type.in_(kinds)
+    opening = (Event.type == 'student_action') & (Event.data['action'].as_string() == 'problem_opened')
+    rows = db.scalars(select(Event).where(Event.session_id == session_id, relevant if concepts is None else relevant | opening)
+                      .order_by(Event.id.desc()).limit(min(limit, 100) if concepts is None else 100)).all()
+    if concepts is not None:
+        wanted = {normalize_concept(name) for name in concepts if name}
+        last_concept = ''
+        matched = []
+        for row in reversed(rows):
+            if row.type == 'student_action':
+                # Older teaching events can inherit the concept of their question.
+                last_concept = normalize_concept(row.data.get('concept'))
+            elif normalize_concept(row.data.get('concept') or last_concept) in wanted:
+                matched.append(row)
+        rows = list(reversed(matched))[:min(limit, 100)]
     record('memory_read', 'Retrieved relevant session history.')
     result = [dict(id=e.id, type=e.type, data=deepcopy(e.data)) for e in reversed(rows)]
     workflow.memory_read(db, 'session history', result)

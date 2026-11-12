@@ -1,5 +1,7 @@
 import json
-from backend import context, memory, reflection, utils
+
+import pytest
+from backend import context, memory, orchestrator, reflection, utils
 from backend.db import Session, StudentState
 
 
@@ -125,3 +127,68 @@ async def test_student_corrected_summary_is_what_the_next_reflection_merges(app_
     assert payloads[0]['learner_profile'] == 'Prefers worked examples.'
     # An empty model summary falls back to prior summary plus this answer, never losing memory.
     assert result['concept_summary'] == 'I now track bounds correctly. Did well.'
+
+
+@pytest.mark.parametrize('new_chat', [True, False])
+async def test_submissions_keep_hypothesis_memory_separate_by_concept(app_env, monkeypatch, new_chat):
+    client, factory, _ = app_env
+    original_model = utils.call_llm
+    reviews, questions = [], []
+
+    def item(concept, reference):
+        return dict(id='gap', concept=concept, possible_gap=f'{concept} gap',
+                    confidence=.4, evidence=[dict(reference=reference, summary='From the submitted answer.')],
+                    diagnostic_focus=f'Practice {concept}', status='tentative')
+
+    async def model(instructions, payload, **kwargs):
+        if kwargs.get('operation') == 'GENERATE_QUESTION':
+            questions.append(payload)
+        if kwargs.get('operation') == 'ANALYZE_HYPOTHESES':
+            reviews.append(payload)
+            concept = payload['context']['concept']
+            reference = payload['evidence_references'][-1]
+            items = [item(concept, reference)]
+            if concept == 'Physics':
+                items.append(item('Photosynthesis', 'event:unrelated'))
+            return kwargs['schema'](hypotheses=items)
+        return await original_model(instructions, payload, **kwargs)
+
+    monkeypatch.setattr(utils, 'call_llm', model)
+
+    def open_question(sid, concept):
+        response = client.post(f'/api/sessions/{sid}/problem', json={'concept': concept})
+        assert response.status_code == 200, response.text
+        return response.json()['state']['current_problem']['id']
+
+    async def submit(sid, question, answer):
+        with factory.begin() as db:
+            job = orchestrator.ingest(db, sid, utils.ClientEvent(
+                type='problem_attempt', content=answer, problem_id=question))
+        outputs = await orchestrator.handle(job)
+        return next(output['state'] for output in outputs if output['type'] == 'hypotheses')
+
+    biology = client.post('/api/sessions').json()['id']
+    biology_question = open_question(biology, 'Photosynthesis')
+    await submit(biology, biology_question, 'Earlier biology answer')
+
+    physics = client.post('/api/sessions').json()['id'] if new_chat else biology
+    physics_question = open_question(physics, 'Physics')
+    assert questions[-1]['hypotheses'] == []
+    with factory.begin() as db:
+        row = db.get(Session, physics)
+        uid = row.user_id
+        # Older sessions copied the whole account hypothesis list into this field.
+        row.state = {**row.state, 'assessed_hypotheses': memory.get_long_term_memory(db, uid)['hypotheses']}
+    assert client.get(f'/api/sessions/{physics}').json()['state']['hypothesis_state']['items'] == []
+
+    result = await submit(physics, physics_question, 'Wrong physics answer')
+    assert [entry['concept'] for entry in result['items']] == ['Physics']
+    assert reviews[-1]['prior_hypotheses'] == []
+    assert 'Photosynthesis' not in json.dumps(reviews[-1])
+    assert 'Earlier biology answer' not in json.dumps(reviews[-1])
+    with factory() as db:
+        saved = memory.get_long_term_memory(db, uid)['hypotheses']
+        assert {entry['concept'] for entry in saved} == {'Photosynthesis', 'Physics'}
+
+    open_question(physics, 'Photosynthesis')
+    assert [entry['concept'] for entry in questions[-1]['hypotheses']] == ['Photosynthesis']

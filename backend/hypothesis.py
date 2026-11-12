@@ -7,7 +7,7 @@ import asyncio
 from copy import deepcopy
 from typing import Literal
 from pydantic import Field
-from . import workflow, config, prompts, utils
+from . import workflow, config, memory, prompts, utils
 from .db import Session
 from .response import content_key, has_content, response_for
 from .logging_setup import event as log_event
@@ -39,17 +39,25 @@ def identity(state):
 
 def view(state):
     panel = deepcopy(state.get('hypothesis_state') or {'status': 'empty', 'items': [], 'version': 0})
+    concept = state.get('current_concept')
+    panel_concept = panel.get('concept')
+    if panel_concept is not None and utils.normalize_concept(panel_concept) != utils.normalize_concept(concept):
+        return {'status': 'empty', 'items': [], 'version': panel['version']}
+    scope = panel.get('concept_scope', [concept])
+    panel['items'] = memory.hypotheses_for_concepts(panel.get('items', []), scope)
     if panel.get('question_id') and (state.get('ended') or (panel.get('question_id'), panel.get('plan_version'),
             panel.get('response_revision')) != identity(state)):
         panel['status'] = 'stale'
     return panel
 
 
-def eligible(state):
+def eligible(state, concepts, assessed):
     panel = view(state)
     if panel['status'] in ('ready', 'empty') and panel.get('items'):
-        return panel['items']
-    return state.get('assessed_hypotheses', [])
+        current = memory.hypotheses_for_concepts(panel['items'], concepts)
+        if current:
+            return current
+    return assessed
 
 
 def context_version(state):
@@ -61,6 +69,9 @@ def context_version(state):
 
 @workflow.stage('Hypothesis · Analyze response', 'agents')
 async def analyze(context, prior, origin, reference, assessment=None, reflection=None):
+    scope = context.get('hypothesis_scope')
+    if scope is not None:
+        prior = memory.hypotheses_for_concepts(prior, scope)
     references = {reference}
     references.update(f"event:{item['id']}" for item in context.get('history', []))
     references.update(e['reference'] for h in prior for e in h.get('evidence', []))
@@ -68,8 +79,10 @@ async def analyze(context, prior, origin, reference, assessment=None, reflection
         prior_hypotheses=prior, origin=origin, evidence_references=sorted(references),
         assessment=assessment, reflection=reflection), schema=Analysis, operation='ANALYZE_HYPOTHESES')
     items = result.model_dump()['hypotheses']
-    if len({item['id'] for item in items}) != len(items):
-        raise ValueError('Hypothesis IDs must be unique.')
+    if scope is not None:
+        items = memory.hypotheses_for_concepts(items, scope)
+    if len({(utils.normalize_concept(item['concept']), item['id']) for item in items}) != len(items):
+        raise ValueError('Hypothesis IDs must be unique within a concept.')
     for item in items:
         if any(e['reference'] not in references for e in item['evidence']):
             raise ValueError('Hypothesis evidence must reference supplied evidence.')
@@ -78,10 +91,14 @@ async def analyze(context, prior, origin, reference, assessment=None, reflection
     return items
 
 
-def panel_for(state, items, origin, status='ready', **extra):
+def panel_for(state, items, origin, status='ready', *, concept_scope=None, **extra):
     qid, plan, revision = identity(state)
+    concept = state.get('current_concept')
+    scope = [concept] if concept_scope is None else concept_scope
+    items = memory.hypotheses_for_concepts(items, scope)
     return dict(status=status if items else ('empty' if status == 'ready' else status), items=items,
         origin=origin, question_id=qid, plan_version=plan, response_revision=revision,
+        concept=concept, concept_scope=scope,
         version=state.get('hypothesis_state', {}).get('version', 0)+1, **extra)
 
 
@@ -152,12 +169,14 @@ class DraftScheduler:
                     with self.factory.begin() as db:
                         current = db.get(Session, sid)
                         context = context_for(db, sid)
+                        scope = context['hypothesis_scope']
+                        prior = context['hypotheses']
                         current.state = {**current.state, 'hypothesis_state': panel_for(state,
-                            state.get('hypothesis_state', {}).get('items', []), 'draft', 'analyzing')}
+                            view(state)['items'], 'draft', 'analyzing', concept_scope=scope)}
                     await self.broadcast(sid, {'type': 'hypotheses', 'state': view(current.state)})
                     log_event('hypothesis.start', session_id=sid, origin='draft', snapshot=snapshot)
                     try:
-                        items = await analyze(context, eligible(state), 'draft',
+                        items = await analyze(context, prior, 'draft',
                             f'draft:{snapshot[0]}:{snapshot[2]}')
                         status, error = 'ready', None
                     except asyncio.CancelledError:
@@ -165,7 +184,7 @@ class DraftScheduler:
                     except Exception as exc:
                         log_event('hypothesis.failed', session_id=sid, origin='draft', error=type(exc).__name__)
                         workflow.record('hypothesis.fallback', 'errors', 'warnings', message='Draft analysis unavailable')
-                        items, status, error = state.get('hypothesis_state', {}).get('items', []), 'unavailable', 'Draft analysis unavailable.'
+                        items, status, error = prior, 'unavailable', 'Draft analysis unavailable.'
                     with self.factory.begin() as db:
                         current = db.get(Session, sid)
                         fresh = deepcopy(current.state)
@@ -173,7 +192,7 @@ class DraftScheduler:
                             workflow.outcome('discarded', 'Response snapshot changed', db=db)
                             log_event('hypothesis.discarded', session_id=sid, snapshot=snapshot)
                             continue
-                        panel = panel_for(fresh, items, 'draft', status, error=error)
+                        panel = panel_for(fresh, items, 'draft', status, concept_scope=scope, error=error)
                         current.state = {**fresh, 'hypothesis_state': panel}
                         workflow.version_artifact('hypotheses', panel['items'], panel['version'], 'produced', db=db)
                         workflow.artifact('hypothesis_snapshot', panel, 'produced', db=db)

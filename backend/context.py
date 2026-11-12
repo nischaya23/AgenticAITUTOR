@@ -1,7 +1,7 @@
 """One bounded, role-aware context contract for all model-facing agents."""
 from copy import deepcopy
 import json
-from . import workflow, config, memory, knowledge
+from . import workflow, config, memory, knowledge, utils
 from .db import Session
 from .response import response_for
 
@@ -36,32 +36,37 @@ def memory_scope(graph: dict, concept: str, role: str) -> list[str]:
     return [concept] + [e.get('prerequisite') for e in graph.get('prerequisites', []) if e.get('concept') == concept]
 
 
-def for_session(db, session_id, query='', role='teaching'):
+def for_session(db, session_id, query='', role='teaching', *, concept=None):
     from . import hypothesis
     row = db.get(Session, session_id)
     state = memory.get_short_term_memory(db, session_id)
-    problem = deepcopy(state.get('current_problem', {}))
+    material = knowledge.get_material(state['material_id']) if state.get('material_id') else {}
+    current_concept = state.get('current_concept', '')
+    concept = current_concept if concept is None else concept
+    scope = memory_scope(material.get('graph', {}), concept, role)
+    same_concept = utils.normalize_concept(current_concept) == utils.normalize_concept(concept)
+    problem = deepcopy(state.get('current_problem', {})) if same_concept else {}
+    response = response_for(state) if same_concept else {'text': ''}
     if role != 'assessment':
         problem = {k:v for k,v in problem.items() if k not in ('expected_answer', 'rubric')}
-    material = knowledge.get_material(state['material_id']) if state.get('material_id') else {}
-    concept = state.get('current_concept', '')
-    student = memory.scoped_long_term(memory.get_long_term_memory(db, row.user_id),
-        memory_scope(material.get('graph', {}), concept, role), concept)
-    result = bound(dict(concept=state.get('current_concept', ''), problem=problem,
-        workspace=response_for(state)['text'], response=response_for(state), query=query,
+    student = memory.scoped_long_term(memory.get_long_term_memory(db, row.user_id), scope, concept)
+    hypotheses = hypothesis.eligible(state, scope, student['hypotheses']) if same_concept else student['hypotheses']
+    result = bound(dict(concept=concept, problem=problem,
+        workspace=response['text'], response=response, query=query,
         learning_request=material.get('learning_request', material.get('topic_description', '')),
         plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
-        material_graph=material.get('graph', {}), graph_sources=material.get('graph_sources',[]), hypotheses=hypothesis.eligible(state),
+        material_graph=material.get('graph', {}), graph_sources=material.get('graph_sources',[]),
+        hypotheses=hypotheses, hypothesis_scope=scope,
         student=student,
-        history=memory.get_relevant_history(db, session_id, 12),
-        knowledge=knowledge.retrieve_knowledge(f"{state.get('current_concept', '')} {query[:1000]}",
+        history=memory.get_relevant_history(db, session_id, 12, concepts=scope),
+        knowledge=knowledge.retrieve_knowledge(f"{concept} {query[:1000]}",
             material_id=state.get('material_id'), user_id=row.user_id),
-        prerequisites=knowledge.get_prerequisites(db, state.get('current_concept', ''),
+        prerequisites=knowledge.get_prerequisites(db, concept,
             material_id=state.get('material_id'), user_id=row.user_id),
         snapshot=dict(question_id=problem.get('id'), revision=state['revision'],
             response_revision=state.get('response_revision', 0), plan_version=state.get('plan_version', 0),
             memory_revision=student.get('memory_revision', 0),
-            hypothesis_version=hypothesis.context_version(state))))
+            hypothesis_version=hypothesis.context_version(state) if same_concept else 0)))
     return result
 
 

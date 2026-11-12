@@ -85,7 +85,7 @@ class StudentData(BaseModel):
     # Untagged notes from the old flat format: visible to the student, never sent to agents.
     archived_notes: list[str] = Field(default_factory=list)
     effective_interventions: dict[str, JsonValue] = Field(default_factory=dict)
-    hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=8)
+    hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list)
     memory_revision: int = 0
     student_goals: list[str] = Field(default_factory=list)
 

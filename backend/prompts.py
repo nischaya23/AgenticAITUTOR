@@ -138,7 +138,7 @@ GENERATE_QUESTION = (
 ) + PLAN_GUIDANCE
 GENERATE_QUESTION_GEMINI = GENERATE_QUESTION
 ANALYZE_HYPOTHESES = (
-    'Identify at most eight uncertain learning hypotheses, never verified diagnoses. Each has '
+    'Identify at most eight uncertain learning hypotheses. Use the exact concept names in hypothesis_scope. Each has '
     'a stable ID (reuse prior IDs), concept, possible knowledge gap, confidence between 0 and 1, '
     'evidence references, suggested diagnostic focus, and status tentative, supported, weakened, '
     'or resolved. Use only supplied evidence reference IDs and summarize the concrete evidence. '
