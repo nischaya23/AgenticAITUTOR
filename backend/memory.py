@@ -7,10 +7,10 @@ from .db import Session, StudentState, Event
 from .utils import SessionData, StudentData, normalize_mastery
 
 
-def get_observer_memory(db, user_id: int) -> dict:
+def get_mastery(db, user_id: int) -> dict:
     row = db.get(StudentState, user_id)
     data = row.data if row else {}
-    return {'mastery': normalize_mastery(data.get('mastery', {})), 'policy': deepcopy(data.get('policy'))}
+    return normalize_mastery(data.get('mastery', {}))
 
 
 def get_short_term_memory(db, session_id: int) -> dict:
@@ -49,6 +49,7 @@ def get_long_term_memory(db, user_id: int) -> dict:
         workflow.memory_read(db, 'learning memory', data, memory_revision=0)
         return data
     data = {**StudentData().model_dump(mode='json'), **deepcopy(row.data)}
+    data.pop('policy', None)
     workflow.memory_read(db, 'learning memory', data, memory_revision=data.get('memory_revision', 0))
     data['mastery'] = normalize_mastery(data.get('mastery', {}))
     return data

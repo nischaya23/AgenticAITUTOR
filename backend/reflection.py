@@ -1,13 +1,12 @@
-"""Outcome summaries, evidence-linked rewards, and optional session synthesis."""
+"""Outcome summaries, evidence-linked feedback, and optional session synthesis."""
 from . import workflow, prompts, utils
 from .activity import record
 from .db import append_event
 from .memory import get_long_term_memory, update_long_term_memory
-from .observer import update_policy, new_policy
 
 def reflect_on_intervention(db, session_id: int, user_id: int, state: dict, evidence: dict, evidence_id: int) -> dict | None:
     o = dict(state.get('observer', {}))
-    pending = o.get('pending_intervention') or o.get('pending_decision')
+    pending = o.get('pending_intervention')
     if not pending:
         record('reflection', 'Intervention reflection skipped: no pending intervention to review.')
         return None
@@ -26,17 +25,15 @@ def reflect_on_intervention(db, session_id: int, user_id: int, state: dict, evid
     record('reflection', 'Reviewing intervention outcome: ' + reason)
     data = get_long_term_memory(db, user_id)
     if reward is not None:
-        policy = update_policy(data['policy'] or new_policy(), pending['action'], pending['features'], reward)
         successes = data['effective_interventions']
         kind = pending.get('tool', pending['action'])
         bucket = dict(successes.get(kind, {'observations': 0, 'reward_sum': 0}))
         bucket['observations'] += 1
         bucket['reward_sum'] += reward
         successes[kind] = bucket
-        update_long_term_memory(db, user_id, {'policy': policy, 'effective_interventions': successes, 'memories': data['memories'] + [f'{kind}: {reason} Reward proxy {reward}; evidence event {evidence_id}.']})
+        update_long_term_memory(db, user_id, {'effective_interventions': successes, 'memories': data['memories'] + [f'{kind}: {reason} Reward proxy {reward}; evidence event {evidence_id}.']})
     entry = append_event(db, session_id, 'reflection', dict(intervention_id=pending.get('event_id'), evidence_event_id=evidence_id, reward=reward, evidence=reason, causal_claim=False, action=pending['action']))
     o.pop('pending_intervention', None)
-    o.pop('pending_decision', None)
     state['observer'] = o
     return {'event_id': entry.id, 'reward': reward, 'replan': reward is not None and reward < 0}
 

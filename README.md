@@ -47,23 +47,19 @@ See [the complete numbered agent flow and architecture](docs/ARCHITECTURE.md).
 
 ## Observer
 
-The numerical Observer uses activity features, struggle thresholds and LinUCB as an advisory baseline. The Observer LLM can override WAIT or WAKE and explains its decision. Routine reviews wait for an eight-second pause and are spaced thirty seconds apart. Completed assessments can trigger priority review.
+The Observer Agent decides WAIT or WAKE using recent activity, help, and assessment evidence. A pause after an edit or inactivity can trigger a routine review. An incorrect assessment gets priority. Reviews run for active, unanswered questions with proactive help enabled and wait for in-flight teaching and grading.
 
-User preferences, typing, inactive/solved questions and in-flight work remain enforced. Repeat automatic help has a fifteen-second minimum; before the normal forty-five-second cooldown expires it also requires new response content or a new incorrect assessment. Approved help goes to the Planner for tool selection.
+The Planner scores tools by successful deliveries on the current question. After a delivered hint, automatic tool choice switches to another tool. Students can still request a specific tool directly.
 
 ```dotenv
 OBSERVER_LLM_ENABLED=true
-FAILURE_THRESHOLD=1
-STALL_SECONDS=30
+OBSERVER_PAUSE_SECONDS=8
 IDLE_SECONDS=60
-COOLDOWN_SECONDS=45
-TYPING_GRACE_SECONDS=3
-AGGREGATION_SECONDS=5
-BANDIT_WARMUP=12
+OBSERVER_REVIEW_SECONDS=30
 PROVIDER_CONCURRENCY=3
 ```
 
-LLM grading is provisional. It updates progress and heuristic mastery but is not a verified LinUCB reward. Hypothesis confidence and mastery are estimates, not calibrated probabilities. Helpful/unhelpful feedback can train the executed policy action. These are observational associations, not causal estimates.
+LLM grading is provisional and updates progress and heuristic mastery. Reflection retains linked feedback and verified outcomes as evidence about delivered help.
 
 ## Web research
 

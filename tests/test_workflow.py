@@ -276,7 +276,8 @@ async def test_sdk_retry_attempts_are_visible_without_extra_model_invocations(ap
     def transport(request):
         attempts.append(request)
         if len(attempts) == 1:
-            return httpx.Response(500, json={'error':{'message':'temporary'}})
+            return httpx.Response(503, json={'error':{'message':'temporary'}},
+                                  headers={'x-goog-request-id':'trace-123','retry-after':'0'})
         return httpx.Response(200, json={'id':'resp_test','object':'response','created_at':1,
             'model':'test-model','output':[{'id':'msg','type':'message','role':'assistant','status':'completed',
                 'content':[{'type':'output_text','text':'Done','annotations':[]}]}],
@@ -293,7 +294,11 @@ async def test_sdk_retry_attempts_are_visible_without_extra_model_invocations(ap
     assert utils.METRICS['llm_calls']-before == 1
     assert detail['status'] == 'warnings'
     assert [e['data']['attempt'] for e in detail['events'] if e['type']=='provider.attempt'] == [1,2]
-    assert [e['data']['http_status'] for e in detail['events'] if e['type']=='provider.response'] == [500,200]
+    responses = [e['data'] for e in detail['events'] if e['type']=='provider.response']
+    assert [item['http_status'] for item in responses] == [503,200]
+    assert responses[0]['provider_request_id'] == 'trace-123'
+    assert responses[0]['retry_after_seconds'] == 0
+    assert responses[0]['duration_ms'] >= 0
     assert 'credential-must-stay-private' not in json.dumps(detail)
 
 
@@ -358,7 +363,7 @@ def test_websocket_workflow_opt_in_keeps_legacy_protocol_compatible(app_env):
             message=socket.receive_json()
             if message['type']=='workflow_events':
                 batches.extend(message['events'])
-                if any(e['type']=='observer.numerical' for e in batches):
+                if any(e['type']=='span.completed' and e['data'].get('name')=='Record student activity' for e in batches):
                     break
-        assert any(e['type']=='observer.numerical' for e in batches)
+        assert any(e['type']=='span.completed' and e['data'].get('name')=='Record student activity' for e in batches)
         assert [e['cursor'] for e in batches]==sorted(e['cursor'] for e in batches)

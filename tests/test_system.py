@@ -6,8 +6,12 @@ import pytest
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
+<<<<<<< HEAD
 from backend import config, db, knowledge, main, memory, observer, orchestrator, planner, reflection, tools, tutor, utils
 from backend.student_model import bkt_update
+=======
+from backend import config, db, features, knowledge, main, memory, orchestrator, planner, reflection, tools, tutor, utils
+>>>>>>> 8b7ce7554cc5d2d792ee16c959492572129f958b
 from conftest import receive_until
 
 
@@ -28,12 +32,9 @@ def ingest(factory, sid, **data):
         return orchestrator.ingest(connection, sid, utils.ClientEvent(**data))
 
 
-def stalled(factory, sid):
-    with factory.begin() as connection:
-        state = memory.get_short_term_memory(connection, sid)
-        state['observer'].update(last_decision_at=0, failure_streak=3, last_progress_at=utils.now()-100,
-                                 last_action_at=utils.now()-10, problem_started_at=utils.now()-150)
-        memory.update_short_term_memory(connection, sid, state)
+def approved_help(factory, sid):
+    return {**ingest(factory, sid, type='student_action', action='idle'),
+            'kind': 'observer_review', 'observer_approved': True}
 
 
 def test_tables_fk_append_only_and_restart(app_env):
@@ -94,28 +95,22 @@ def test_explicit_websocket_ignores_proactive_preference(app_env):
     assert client.get('/api/student').json()['learning_goals']
 
 
-def test_wait_never_starts_agents(app_env, monkeypatch):
-    client, factory, _ = app_env
+def test_disabled_observer_never_starts_agents(app_env, monkeypatch):
+    client, _, _ = app_env
     handle = AsyncMock()
     monkeypatch.setattr(orchestrator, 'handle', handle)
     sid = create(client)
-    with factory.begin() as connection:
-        state=memory.get_short_term_memory(connection,sid)
-        state['observer']['last_decision_at']=0
-        memory.update_short_term_memory(connection,sid,state)
     monkeypatch.setattr(utils, 'call_llm', AsyncMock(side_effect=AssertionError('Observer called an LLM')))
     with client.websocket_connect(f'/ws/{sid}') as socket:
         socket.send_json({'type':'student_action','action':'idle'})
-        assert receive_until(socket,'ack')['decision'] == 'WAIT'
+        assert receive_until(socket,'ack')['action'] == 'idle'
     assert handle.await_count == 0
 
 
-async def test_wake_reflection_bandit_and_mastery_persist(app_env):
+async def test_approved_help_reflection_and_mastery_persist(app_env):
     client, factory, _ = app_env
     sid = create(client)
-    stalled(factory, sid)
-    job = ingest(factory, sid, type='student_action', action='idle')
-    assert job['decision'] == 'WAKE'
+    job = approved_help(factory, sid)
     outputs = await orchestrator.handle(job)
     assert outputs[0]['proactive']
     with factory() as connection:
@@ -126,8 +121,13 @@ async def test_wake_reflection_bandit_and_mastery_persist(app_env):
     assert outputs[0]['type'] == 'assessment' and outputs[0]['result']['correct']
     with factory() as connection:
         model = memory.get_long_term_memory(connection,row.user_id)
+<<<<<<< HEAD
         assert model['policy']['updates'] == 1
         assert model['mastery']['Binary Search'] == round(bkt_update(None, 1, True), 4)
+=======
+        assert model['effective_interventions']['guiding_question'] == {'observations': 1, 'reward_sum': .5}
+        assert model['mastery']['Binary Search'] == .6
+>>>>>>> 8b7ce7554cc5d2d792ee16c959492572129f958b
         assert model['memories']
         reflections = connection.scalars(select(db.Event).where(db.Event.type=='reflection')).all()
         assert next(r for r in reflections if 'reward' in r.data).data['reward'] == .5
@@ -137,8 +137,7 @@ async def test_wake_reflection_bandit_and_mastery_persist(app_env):
 async def test_stale_proactive_response_is_discarded(app_env, monkeypatch):
     client, factory, _ = app_env
     sid = create(client)
-    stalled(factory, sid)
-    job = ingest(factory,sid,type='student_action',action='idle')
+    job = approved_help(factory, sid)
     entered, release = asyncio.Event(), asyncio.Event()
     original = tutor.respond_to_student
     async def slow(context, selection):
@@ -164,60 +163,97 @@ async def test_duplicate_trigger_does_not_deliver_twice(app_env):
     assert await orchestrator.deliver_intervention(job,True) is None
 
 
-def test_observer_typing_cooldown_preferences_and_aggregation(monkeypatch):
-    monkeypatch.setattr(utils,'call_llm',AsyncMock(side_effect=AssertionError('LLM forbidden')))
-    state={'observer':{'failure_streak':3,'last_progress_at':0,'last_action_at':0,'problem_started_at':0},'proactive_enabled':True}
-    decision,o,_=observer.observe(state,'student_action',{'action':'edit'},.5,observer.new_policy(),100)
-    assert decision=='DEFER'
-    decision,o,_=observer.observe({**state,'observer':o},'student_action',{'action':'idle'},.5,observer.new_policy(),105)
-    assert decision=='WAKE'
-    for update in ({'last_intervention_at':99},{'pending_wake':True},{'pending_intervention':{'at':99}}):
-        decision,_,_=observer.observe({**state,'observer':{**state['observer'],**update}},'student_action',{'action':'idle'},.5,observer.new_policy(),100)
-        assert decision=='WAIT'
-    decision,_,_=observer.observe({**state,'proactive_enabled':False},'student_action',{},.5,observer.new_policy(),100)
-    assert decision=='WAIT'
+async def test_planner_scores_delivered_tools_and_switches_after_a_hint(app_env, monkeypatch):
+    client, factory, _ = app_env
+    sid = create(client)
+    problem_id = 'binary-search-first'
+    tool_choice = 'hint'
+    original_model = utils.call_llm
+    model_scores = []
+
+    async def model(instructions, data, **kwargs):
+        if kwargs.get('schema') is planner.Selection:
+            model_scores.append(data['eligible_tool_scores'])
+            return planner.Selection(action=tool_choice, strategy='One step')
+        return await original_model(instructions, data, **kwargs)
+
+    monkeypatch.setattr(utils, 'call_llm', model)
+    original_tutor = tutor.respond_to_student
+    failure = AsyncMock(side_effect=ValueError('Tool failed before delivery.'))
+    monkeypatch.setattr(tutor, 'respond_to_student', failure)
+    with pytest.raises(ValueError, match='before delivery'):
+        await orchestrator.handle(ingest(factory, sid, type='student_message', content='Help me get started.'))
+    monkeypatch.setattr(tutor, 'respond_to_student', original_tutor)
+
+    first = await orchestrator.handle(ingest(factory, sid, type='student_message', content='Help me get started.'))
+    assert first[0]['result']['type'] == 'hint'
+    assert model_scores[-1]['hint'] == 1
+    assert 'highlight' not in model_scores[-1]
+    saved = client.get(f'/api/sessions/{sid}').json()
+    assert any(event['type'] == 'intervention' and event['data']['type'] == 'hint' for event in saved['history'])
+
+    second = await orchestrator.handle(ingest(factory, sid, type='student_message', content='I still need help.'))
+    assert second[0]['result']['type'] == 'explanation'
+    assert 'hint' not in model_scores[-1]
+    explicit = await orchestrator.handle(ingest(factory, sid, type='student_message', content='Give me another hint.', tool='hint'))
+    assert explicit[0]['result']['type'] == 'hint'
+    assert len(model_scores) == 3
+
+    tool_choice = 'visualization'
+    queued = AsyncMock(return_value={'type': 'video_pending', 'operation_id': 'v1'})
+    monkeypatch.setattr(features, 'queue_video', queued)
+    output = await orchestrator.handle(approved_help(factory, sid))
+    assert output[0]['type'] == 'video_pending'
+    assert model_scores[-1]['explanation'] == .5
+    assert model_scores[-1]['visualization'] == 1
+    assert queued.call_args.args[1]['type'] == 'visualization'
+    with factory() as connection:
+        assert planner.tool_scores(connection, sid, problem_id, '')['visualization'] == 1
+
+    response = client.post(f'/api/sessions/{sid}/problem', json={'concept': 'Binary Search'})
+    assert response.status_code == 200
+    new_id = response.json()['state']['current_problem']['id']
+    with factory.begin() as connection:
+        assert planner.tool_scores(connection, sid, new_id, '')['hint'] == 1
+        db.append_event(connection, sid, 'intervention', {'type': 'hint', 'content': 'Legacy hint'})
+        assert 'hint' not in planner.tool_scores(connection, sid, new_id, '')
 
 
-def test_learned_policy_can_choose_wait_and_receive_real_feedback(app_env):
+def test_legacy_policy_is_hidden_and_removed_on_memory_write(app_env):
     client,factory,_=app_env
     sid=create(client)
-    stalled(factory,sid)
-    policy=observer.new_policy();policy['updates']=20;policy['b'][0]=[100.]*10
     with factory.begin() as connection:
-        row=connection.get(db.Session,sid)
-        memory.update_long_term_memory(connection,row.user_id,{'policy':policy})
-    job=ingest(factory,sid,type='student_action',action='idle')
-    assert job['decision']=='WAIT'
+        uid=connection.get(db.Session,sid).user_id
+        student=connection.get(db.StudentState,uid)
+        student.data={**student.data,'policy':{'updates':20}}
+    assert 'policy' not in client.get('/api/student').json()
     with factory.begin() as connection:
-        row=connection.get(db.Session,sid);state=memory.get_short_term_memory(connection,sid)
-        assert state['observer']['pending_decision']['action']=='WAIT'
-        reflection.reflect_on_intervention(connection,sid,row.user_id,state,{'verified':True,'correct':True},job['event_id'])
-        memory.update_short_term_memory(connection,sid,state)
+        memory.update_long_term_memory(connection,uid,{'learning_goals':['Practice']})
     with factory() as connection:
-        assert memory.get_long_term_memory(connection,row.user_id)['policy']['updates']==21
+        assert 'policy' not in connection.get(db.StudentState,uid).data
 
 
-async def test_unverified_assessment_does_not_reward_bandit(app_env):
+async def test_unverified_assessment_does_not_credit_delivered_help(app_env):
     client,factory,_=app_env
-    sid=create(client);stalled(factory,sid)
-    await orchestrator.handle(ingest(factory,sid,type='student_action',action='idle'))
+    sid=create(client)
+    await orchestrator.handle(approved_help(factory,sid))
     with factory.begin() as connection:
         row=connection.get(db.Session,sid);state=memory.get_short_term_memory(connection,sid)
         assert reflection.reflect_on_intervention(connection,sid,row.user_id,state,{'verified':False,'correct':True},1) is None
-        assert memory.get_long_term_memory(connection,row.user_id)['policy']['updates']==0
+        assert memory.get_long_term_memory(connection,row.user_id)['effective_interventions']=={}
 
 
 async def test_feedback_is_linked_once_and_negative_outcome_replans(app_env):
     client,factory,_=app_env
-    sid=create(client);stalled(factory,sid)
-    output=(await orchestrator.handle(ingest(factory,sid,type='student_action',action='idle')))[0]
+    sid=create(client)
+    output=(await orchestrator.handle(approved_help(factory,sid)))[0]
     with pytest.raises(ValueError):
         ingest(factory,sid,type='feedback',rating=1,intervention_id=999)
     job=ingest(factory,sid,type='feedback',rating=-1,intervention_id=output['event_id'])
     assert not job['replan']
     assert any(output['type'] == 'plan' for output in await orchestrator.handle(job))
     with factory() as connection:
-        assert memory.get_long_term_memory(connection, connection.get(db.Session, sid).user_id)['policy']['updates'] == 1
+        assert memory.get_long_term_memory(connection, connection.get(db.Session, sid).user_id)['effective_interventions']['guiding_question']['reward_sum'] == -1
     with pytest.raises(ValueError):
         ingest(factory,sid,type='feedback',rating=1,intervention_id=output['event_id'])
 
@@ -305,15 +341,6 @@ async def test_real_sdk_responses_protocol_with_mock_transport(app_env,monkeypat
     assert fake.responses.parse.await_count==2 and fake.responses.create.await_count==2
 
 
-async def test_observer_performance_and_metric_counts(app_env):
-    policy=observer.new_policy()
-    for _ in range(1000):
-        observer.observe({'observer':{},'proactive_enabled':False},'student_action',{'action':'idle'},.5,policy)
-    mean=utils.METRICS['observer_latency_ms']/utils.METRICS['observer_events']
-    assert mean<20  # Broad regression bound, not a hardware benchmark.
-    assert utils.METRICS['observer_wait']==1000
-
-
 async def test_repeated_correct_answer_cannot_inflate_mastery(app_env):
     client,factory,_=app_env
     sid=create(client)
@@ -331,24 +358,17 @@ async def test_reasoning_assessment_is_not_exact_answer_check(app_env):
     assert output[0]['result']['verified'] is False
 
 
-def test_expired_observer_outcome_does_not_block_new_help():
-    state={'observer':{'failure_streak':3,'last_progress_at':0,'last_action_at':0,
-        'pending_intervention':{'at':1}},'proactive_enabled':True}
-    action,o,_=observer.observe(state,'student_action',{'action':'idle'},.5,observer.new_policy(),1000)
-    assert action=='WAKE' and 'pending_intervention' not in o
-
-
-async def test_pre_intervention_attempt_is_not_credited_to_the_bandit(app_env):
+async def test_pre_intervention_attempt_is_not_credited_as_an_outcome(app_env):
     client,factory,_=app_env
-    sid=create(client);stalled(factory,sid)
-    job=ingest(factory,sid,type='student_action',action='idle')
+    sid=create(client)
+    job=approved_help(factory,sid)
     await orchestrator.handle(job)
     with factory.begin() as connection:
         row=connection.get(db.Session,sid);state=memory.get_short_term_memory(connection,sid)
         result=reflection.reflect_on_intervention(connection,sid,row.user_id,state,
             {'verified':True,'correct':True,'observed_at':job['received_at']-10},job['event_id'])
         assert result['reward'] is None
-        assert memory.get_long_term_memory(connection,row.user_id)['policy']['updates']==0
+        assert memory.get_long_term_memory(connection,row.user_id)['effective_interventions']=={}
 
 
 def test_multiple_materials_build_one_graph(app_env):

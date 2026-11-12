@@ -13,8 +13,7 @@ from pydantic import ValidationError
 from backend import config, context, features, memory, operations, orchestrator, research, utils, video, websearch
 from backend.db import Session, Operation, StudentState, User
 from backend.drawing_script import DrawingScript
-from backend.observer_review import Decision, ReviewScheduler, allowed
-from backend.response import content_key
+from backend.observer_review import Decision, ReviewScheduler
 from test_study import prepare
 
 
@@ -117,6 +116,23 @@ def test_upload_research_failure_keeps_upload_and_text_contract(app_env):
         assert socket.receive_json()['type']=='error'
 
 
+def test_upload_reports_provider_unavailability(app_env, monkeypatch):
+    import httpx
+    from openai import InternalServerError
+    from backend import knowledge
+
+    client, _, _ = app_env
+    monkeypatch.setattr(config, 'LLM_PROVIDER', 'gemini')
+    monkeypatch.setattr(config, 'WEB_SEARCH_ON_UPLOAD', False)
+    response = httpx.Response(503, request=httpx.Request('POST', 'https://example.test'))
+    monkeypatch.setattr(knowledge, 'extract_concepts', AsyncMock(side_effect=InternalServerError(
+        'provider error', response=response, body={'error': {'status': 'UNAVAILABLE'}})))
+    upload = client.post('/api/material-jobs', files={'files': ('notes.md', b'# Search\nNotes.', 'text/markdown')})
+    job = wait_job(client, upload.json()['id'])
+    assert job['status'] == 'failed'
+    assert job['error'] == 'Gemini is temporarily unavailable (HTTP 503). Try again shortly.'
+
+
 async def test_research_uses_native_tool_results_and_respects_budget(monkeypatch):
     calls=[]
     async def model(instructions,data,**kwargs):
@@ -133,44 +149,101 @@ async def test_research_uses_native_tool_results_and_respects_budget(monkeypatch
     assert calls[1]['tool_history'][0]['result'][0]['url']=='https://example.org/search'
 
 
-@pytest.mark.parametrize('action',['WAIT','WAKE'])
-async def test_observer_llm_can_override_either_baseline(app_env,monkeypatch,action):
-    client,factory,_=app_env
-    sid,_,_=prepare(client)
-    monkeypatch.setattr(config,'OBSERVER_LLM_ENABLED',True)
+@pytest.mark.parametrize('action', ['WAIT', 'WAKE'])
+async def test_observer_decides_on_idle_even_after_recent_help(app_env, monkeypatch, action):
+    client, factory, _ = app_env
+    sid, _, _ = prepare(client)
+    monkeypatch.setattr(config, 'OBSERVER_LLM_ENABLED', True)
+    monkeypatch.setattr(config, 'IDLE_SECONDS', 60)
+    now = 1000
+    monkeypatch.setattr(utils, 'now', lambda: now)
     with factory.begin() as db:
-        state=memory.get_short_term_memory(db,sid)
-        state['observer'].update(last_edit_at=0,last_intervention_at=0,status={'decision':'WAKE' if action=='WAIT' else 'WAIT','features':{'concept_mastery':.5}})
-        memory.update_short_term_memory(db,sid,state)
-        job=orchestrator.ingest(db,sid,utils.ClientEvent(type='student_action',action='idle'))
-        # Set the intentionally opposite baseline after ingest updates its numeric recommendation.
-        state=memory.get_short_term_memory(db,sid)
-        state['observer']['status']['decision']='WAKE' if action=='WAIT' else 'WAIT'
-        state['observer']['last_decision_at']=0
-        if action=='WAIT': state['observer'].update(failure_streak=3,last_progress_at=utils.now()-100,last_action_at=utils.now()-100)
-        memory.update_short_term_memory(db,sid,state)
-    monkeypatch.setattr(utils,'call_llm',AsyncMock(return_value=Decision(action=action,reason='Current evidence justifies this decision.',evidence_references=[])))
-    run=AsyncMock();publish=AsyncMock()
-    scheduler=ReviewScheduler(factory,publish,lambda *_:None,run)
-    scheduler.schedule(sid,job,priority=True)
+        state = memory.get_short_term_memory(db, sid)
+        state['observer'].update(last_action_at=now - 59, last_intervention_at=now - 2)
+        memory.update_short_term_memory(db, sid, state)
+        job = orchestrator.ingest(db, sid, utils.ClientEvent(type='student_action', action='idle'))
+    model = AsyncMock(return_value=Decision(action=action, reason='Reviewed the current work.', evidence_references=[]))
+    monkeypatch.setattr(utils, 'call_llm', model)
+    run = AsyncMock()
+    scheduler = ReviewScheduler(factory, AsyncMock(), lambda *_: None, run)
+    scheduler.schedule(sid, job)
     await scheduler.tasks[sid]
+    model.assert_not_awaited()
+    now += 1
+    scheduler.schedule(sid, job)
+    await scheduler.tasks[sid]
+    assert model.call_args.args[1]['trigger'] == 'idle'
+    assert model.call_args.args[1]['activity']['seconds_since_help'] == 3
     with factory() as db:
-        status=db.get(Session,sid).state['observer']['status']
-        assert status['decision']==action
-        assert status['baseline_decision']!=action
-    assert run.await_count==(action=='WAKE')
+        assert db.get(Session, sid).state['observer']['status']['decision'] == action
+    assert run.await_count == (action == 'WAKE')
+    if action == 'WAKE':
+        assert run.call_args.args[0]['observer_approved']
 
 
-def test_observer_early_help_requires_new_evidence_and_respects_hard_guards():
-    state=dict(current_problem={'id':'q'},response={'text':'old'},revision=1,proactive_enabled=True,
-        observer=dict(last_intervention_at=100,last_edit_at=0,intervention_response_key=content_key({'text':'old'})))
-    assert not allowed(state,114)
-    assert not allowed(state,120)
-    state['response']={'text':'new reasoning'}
-    assert allowed(state,120)
-    assert not allowed({**state,'proactive_enabled':False},120)
-    assert not allowed({**state,'pending_video':'v'},120)
-    assert not allowed({**state,'observer':{**state['observer'],'last_edit_at':119}},120)
+@pytest.mark.parametrize('routine_overdue', [False, True])
+async def test_committed_incorrect_assessment_takes_priority(app_env, monkeypatch, routine_overdue):
+    client, factory, _ = app_env
+    sid, _, study = prepare(client)
+    monkeypatch.setattr(config, 'OBSERVER_LLM_ENABLED', True)
+    with factory.begin() as db:
+        job = orchestrator.ingest(db, sid, utils.ClientEvent(
+            type='problem_attempt', content='wrong', problem_id=study['state']['current_problem']['id']))
+    await orchestrator.handle(job)
+    model = AsyncMock(return_value=Decision(action='WAIT', reason='Let the student apply the feedback.', evidence_references=[]))
+    monkeypatch.setattr(utils, 'call_llm', model)
+    scheduler = ReviewScheduler(factory, AsyncMock(), lambda *_: None, AsyncMock())
+    now = utils.now()
+    scheduler.last_started[sid] = now - config.OBSERVER_REVIEW_SECONDS - 1 if routine_overdue else now
+    with factory.begin() as db:
+        state = memory.get_short_term_memory(db, sid)
+        state['observer']['last_edit_at'] = now - config.OBSERVER_PAUSE_SECONDS - 1
+        memory.update_short_term_memory(db, sid, state)
+    edit = {**job, 'kind': 'student_action', 'action': 'edit', 'draft_changed': True}
+    edit.pop('incorrect_assessment_id')
+    scheduler.schedule(sid, edit)
+    scheduler.schedule(sid, job)
+    await asyncio.wait_for(scheduler.tasks[sid], 2)
+    assert model.call_args.args[1]['trigger'] == 'incorrect_assessment'
+    assert model.call_args.args[1]['activity']['last_assessment']['correct'] is False
+    assert model.await_count == 1
+    scheduler.run_job.assert_not_awaited()
+
+
+@pytest.mark.parametrize('scenario', ['disabled', 'stale', 'failure', 'invalid'])
+async def test_observer_does_not_wake_without_a_fresh_valid_decision(app_env, monkeypatch, scenario):
+    client, factory, _ = app_env
+    sid, _, _ = prepare(client)
+    monkeypatch.setattr(config, 'OBSERVER_LLM_ENABLED', True)
+    monkeypatch.setattr(config, 'IDLE_SECONDS', 0)
+    with factory.begin() as db:
+        if scenario == 'disabled':
+            memory.update_short_term_memory(db, sid, {'proactive_enabled': False})
+        job = orchestrator.ingest(db, sid, utils.ClientEvent(type='student_action', action='idle'))
+
+    async def decide(*args, **kwargs):
+        if scenario == 'failure':
+            raise RuntimeError('provider unavailable')
+        if scenario == 'invalid':
+            return {'action': 'WAKE', 'reason': 'Needs help.', 'evidence_references': ['event:missing']}
+        with factory.begin() as db:
+            orchestrator.ingest(db, sid, utils.ClientEvent(type='student_action', action='edit', content='New work'))
+        return Decision(action='WAKE', reason='Needs help.', evidence_references=[])
+
+    model = AsyncMock(side_effect=decide)
+    monkeypatch.setattr(utils, 'call_llm', model)
+    run = AsyncMock()
+    publish = AsyncMock()
+    scheduler = ReviewScheduler(factory, publish, lambda *_: None, run)
+    scheduler.schedule(sid, job)
+    await scheduler.tasks[sid]
+    run.assert_not_awaited()
+    if scenario == 'disabled':
+        model.assert_not_awaited()
+    if scenario in ('disabled', 'stale'):
+        publish.assert_not_awaited()
+    else:
+        assert publish.call_args.args[1]['decision'] == 'UNAVAILABLE'
 
 
 def test_drawing_interpreter_blocks_execution_and_bounds_work():
@@ -250,12 +323,14 @@ async def test_observer_coalesces_drafts_after_quiet_period_and_limits_review_ra
     client,factory,_=app_env
     sid,_,_=prepare(client)
     clock=Clock();monkeypatch.setattr(utils,'now',lambda:clock.time)
-    from backend import observer as numerical_observer
-    monkeypatch.setattr(numerical_observer,'now',lambda:clock.time)
     monkeypatch.setattr(config,'OBSERVER_LLM_ENABLED',True)
+    monkeypatch.setattr(config,'OBSERVER_PAUSE_SECONDS',8)
+    monkeypatch.setattr(config,'OBSERVER_REVIEW_SECONDS',30)
     model=AsyncMock(return_value=Decision(action='WAIT',reason='The student is progressing.',evidence_references=[]))
     monkeypatch.setattr(utils,'call_llm',model)
-    scheduler=ReviewScheduler(factory,AsyncMock(),lambda *_:None,AsyncMock());scheduler.sleep=clock.sleep
+    busy = True
+    scheduler=ReviewScheduler(factory,AsyncMock(),lambda *_:None,AsyncMock(),busy=lambda _: busy)
+    scheduler.sleep=clock.sleep
     def edit(text):
         with factory.begin() as db:
             return orchestrator.ingest(db,sid,utils.ClientEvent(type='student_action',action='edit',content=text))
@@ -265,6 +340,9 @@ async def test_observer_coalesces_drafts_after_quiet_period_and_limits_review_ra
     await clock.advance(4)
     assert model.await_count==0
     await clock.advance(4)
+    assert model.await_count==0
+    busy = False
+    await clock.advance(1)
     assert model.await_count==1
     assert model.call_args.args[1]['context']['response']['text']=='Latest draft'
     scheduler.schedule(sid,edit('New reasoning'))

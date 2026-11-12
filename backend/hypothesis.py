@@ -52,6 +52,13 @@ def eligible(state):
     return state.get('assessed_hypotheses', [])
 
 
+def context_version(state):
+    panel = view(state)
+    if panel['status'] in ('ready', 'empty') and panel.get('items'):
+        return panel['version']
+    return state.get('assessed_hypothesis_version', 0)
+
+
 @workflow.stage('Hypothesis · Analyze response', 'agents')
 async def analyze(context, prior, origin, reference, assessment=None, reflection=None):
     references = {reference}

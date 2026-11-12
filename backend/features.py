@@ -8,7 +8,6 @@ from fastapi.responses import StreamingResponse, FileResponse, Response
 from pydantic import Field, field_validator
 from . import workflow, utils, memory, context, knowledge, research, websearch, operations, video
 from .db import Session, Operation, append_event
-from .response import content_key, response_for
 
 router = APIRouter()
 VIDEO_TASKS = {}
@@ -224,13 +223,14 @@ async def queue_video(job,result,learning_context):
                 return dict(discarded=True)
             final=dict(type='visualization',content=spec.content,metadata=dict(concept=spec.concept,video=payload,source_ids=spec.source_ids,
                 retrieved_sources=[dict(id=p['id'],source=p['source'],url=p.get('url')) for p in learning_context['knowledge']]))
-            event=append_event(db,sid,'intervention',dict(**final,trigger_event_id=job['event_id'],proactive=not job['explicit']))
-            o=state['observer']; o.pop('pending_wake',None)
-            old=o.pop('pending_intervention',None) or o.pop('pending_decision',None)
+            event=append_event(db,sid,'intervention',dict(**final,trigger_event_id=job['event_id'],
+                proactive=not job['explicit'],problem_id=state['current_problem']['id']))
+            o=state['observer']
+            old=o.pop('pending_intervention',None)
             if old: append_event(db,sid,'intervention_closed',dict(intervention_id=old.get('event_id'),reward=None,evidence='Superseded by delivered video.'))
-            o['last_intervention_at']=utils.now(); o['intervention_response_key']=content_key(response_for(state))
+            o['last_intervention_at']=utils.now()
             if not job['explicit']:
-                o['pending_intervention']=dict(action='WAKE',event_id=event.id,features=o.get('wake_features',{}),tool='visualization',at=utils.now())
+                o['pending_intervention']=dict(action='WAKE',event_id=event.id,tool='visualization',at=utils.now())
             memory.update_short_term_memory(db,sid,{**state,'pending_video':None})
             delivered=dict(type='intervention',event_id=event.id,proactive=not job['explicit'],result=final,revision=state['revision'])
         delivered['workflow_run_id'] = workflow.CURRENT.get().run_id if workflow.CURRENT.get() else None

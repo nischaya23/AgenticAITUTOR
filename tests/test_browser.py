@@ -19,8 +19,7 @@ def test_all_interventions_materials_and_mobile(tmp_path):
         probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
     base=f'http://127.0.0.1:{port}'
     env={**os.environ,'DATABASE_URL':f'sqlite:///{tmp_path / "ui.db"}',
-         'PYTHONPATH':str(root/'tests')+os.pathsep+str(root),'DATA_DIR':str(tmp_path/'materials'),'FAILURE_THRESHOLD':'1','STALL_SECONDS':'0',
-         'AGGREGATION_SECONDS':'0','TYPING_GRACE_SECONDS':'0','LLM_PROVIDER':'openai'}
+         'PYTHONPATH':str(root/'tests')+os.pathsep+str(root),'DATA_DIR':str(tmp_path/'materials'),'LLM_PROVIDER':'openai'}
     server=subprocess.Popen([sys.executable,'-m','uvicorn','browser_server:app','--host','127.0.0.1',
                              '--port',str(port)],cwd=root,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:

@@ -1,7 +1,7 @@
 """Python routing with snapshot checks before committing teaching output."""
 from copy import deepcopy
 from sqlalchemy import select
-from . import workflow, config, hypothesis, plans, activity, assessment, memory, observer, planner, reflection, student_model, tools, tutor, utils
+from . import workflow, hypothesis, plans, activity, assessment, memory, observer, observer_review, planner, reflection, student_model, tools, tutor, utils
 from .response import Response, response_for, content_key, has_content
 from .logging_setup import event as log_event
 from .db import Event, Session, append_event
@@ -13,25 +13,8 @@ def context_for(db, session_id: int, query: str = '') -> dict:
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):
-    model = memory.get_observer_memory(db, row.user_id)
-    policy = model['policy'] or observer.new_policy()
-    if not model['policy']:
-        memory.update_long_term_memory(db, row.user_id, {'policy': policy})
-    existing = dict(state.get('observer', {}))
-    action, o, features = observer.observe(state, kind, data,
-        model['mastery'].get(state['current_concept'], .5), policy)
-    if config.OBSERVER_LLM_ENABLED:
-        if not existing.get('pending_wake'): o.pop('pending_wake', None)
-        if not existing.get('pending_decision'): o.pop('pending_decision', None)
-    state['observer'] = o
-    retired = o.pop('retired_outcome', None)
-    if retired:
-        append_event(db, row.id, 'intervention_closed', retired)
-    if action == 'WAKE':
-        append_event(db, row.id, 'observer_trigger', {'decision': action, 'features': features,
-                                                     'revision': state['revision']})
+    state['observer'] = observer.observe(state, kind, data)
     memory.update_short_term_memory(db, row.id, state)
-    return action
 
 
 def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
@@ -53,6 +36,9 @@ def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
     if event.type == 'preferences':
         if event.proactive_enabled is None:
             raise ValueError('Set proactive_enabled to true or false.')
+        if event.proactive_enabled != state['proactive_enabled']:
+            state['revision'] += 1
+            state.get('observer', {}).pop('status', None)
         state['proactive_enabled'] = event.proactive_enabled
     submitted = event.response.model_dump() if event.response is not None else Response(text=event.content).model_dump()
     if event.type == 'problem_attempt' and not has_content(submitted):
@@ -67,8 +53,7 @@ def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
     draft_changed = False
     if explicit:
         o = state.get('observer', {})
-        pending = o.pop('pending_intervention', None) or o.pop('pending_decision', None)
-        o.pop('pending_decision', None)
+        pending = o.pop('pending_intervention', None)
         if pending:
             append_event(db, session_id, 'intervention_closed', {'intervention_id': pending.get('event_id'),
                 'reward': None, 'evidence': 'New explicit help request censors the previous outcome window.'})
@@ -96,11 +81,11 @@ def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
         state['last_draft_event_id'] = entry.id
     if event.type == 'problem_attempt':
         state['pending_assessment_event_id'] = entry.id
-    decision = persist_observation(db, row, state, event.type, data)
+    persist_observation(db, row, state, event.type, data)
     return dict(event_id=entry.id, session_id=session_id, revision=state['revision'], explicit=explicit,
                 received_at=received_at,
                 requested=event.tool or ('hint' if event.action == 'hint_request' else None),
-                kind=event.type, content=event.content, decision=decision,
+                kind=event.type, action=event.action, content=event.content,
                 problem=deepcopy(state['current_problem']), concept=state['current_concept'],
                 response=deepcopy(submitted) if event.type == 'problem_attempt' else None,
                 unified=event.response is not None, response_revision=state.get('response_revision', 0),
@@ -116,31 +101,22 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
         raise ValueError('Session not found.')
     trace = workflow.create_run(row.user_id, 'Answer assessment' if event.type == 'problem_attempt' else
         'Student request' if event.type == 'student_message' or event.action == 'hint_request' else
-        'Observer · Numerical decision' if event.type == 'student_action' else event.type.replace('_', ' ').capitalize(),
+        'Student activity' if event.type == 'student_action' else event.type.replace('_', ' ').capitalize(),
         session_id=session_id, trigger={'action': event.action, 'event_type': event.type}, db=db)
     token = workflow.CURRENT.set(trace)
     try:
-        with workflow.local_span(db, 'Observer · Numerical baseline', 'agents'):
+        with workflow.local_span(db, 'Record student activity'):
             job = _ingest(db, session_id, event)
         if trace:
             job['workflow_run_id'] = trace.run_id
             workflow.update_run_data(db=db, trigger_event_id=job['event_id'], response_revision=job['response_revision'],
                 plan_version=job['plan_version'], question_id=job['problem'].get('id'))
-            workflow.record('observer.numerical', db=db, decision=job['decision'],
-                response_revision=job['response_revision'], trigger_event_id=job['event_id'],
-                status_details=row.state.get('observer', {}).get('status', {}))
-            queued = job['explicit'] or (not config.OBSERVER_LLM_ENABLED and job['decision'] == 'WAKE') or job['kind'] in ('problem_attempt', 'session_end', 'feedback')
+            queued = job['explicit'] or job['kind'] in ('problem_attempt', 'session_end', 'feedback')
             if not queued:
                 workflow.finish(db=db)
         return job
     finally:
         workflow.CURRENT.reset(token)
-
-
-def clear_pending_wake(db, session_id: int):
-    state = memory.get_short_term_memory(db, session_id)
-    state['observer'].pop('pending_wake', None)
-    memory.update_short_term_memory(db, session_id, state)
 
 
 async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
@@ -149,12 +125,16 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
         state = deepcopy(row.state)
-        if state['ended'] or (not explicit and (state['revision'] != job['revision'] or not state['proactive_enabled'])):
-            clear_pending_wake(db, sid)
+        if state['ended'] or (not explicit and (state['revision'] != job['revision']
+                or not observer_review.allowed(state) or state.get('assessment_pending') or state.get('pending_video'))):
             workflow.outcome('discarded', 'Question, response or context changed', db=db)
             utils.METRICS['stale_interventions'] += 1
             return None
         context = context_for(db, sid, job['content'])
+        if job.get('observer_snapshot') and observer_review.snapshot(
+                state, context['snapshot']['memory_revision']) != job['observer_snapshot']:
+            workflow.outcome('discarded', 'Observer decision no longer matches the session', db=db)
+            return None
         snapshot = state['revision']
         needs_plan = not state.get('plan', {}).get('steps')
     plan = await planner.create_learning_plan(context) if needs_plan else context['plan']
@@ -172,16 +152,10 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
                     context = context_for(db, sid, job['content'])
             else:
                 context['knowledge'] += [dict(id=p['url'],source=p['title'],text=p['text'][:2000]) for p in pages]
-    selection = await planner.select_intervention(context, explicit or job.get('observer_approved', False),
-        'explanation' if job.get('requested') == 'web_search' else job.get('requested'))
-    if selection['action'] == 'none':
-        if explicit or job.get('observer_approved'):
-            selection = {'action': 'explanation', 'strategy': 'Answer the explicit question.'}
-        else:
-            with SessionLocal.begin() as db:
-                clear_pending_wake(db, sid)
-                append_event(db, sid, 'plan', {'decision': 'none', 'trigger_event_id': job['event_id']})
-            return None
+    with SessionLocal() as db:
+        scores = planner.tool_scores(db, sid, job['problem']['id'], context['workspace'])
+    selection = await planner.select_intervention(context, explicit,
+        'explanation' if job.get('requested') == 'web_search' else job.get('requested'), scores=scores)
     result = await tutor.respond_to_student(context, selection)
     if 'video_script' in result.get('metadata', {}):
         from .features import queue_video
@@ -195,14 +169,13 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         model=memory.get_long_term_memory(db,row.user_id)
         context_changed = current.get('plan_version',0)!=context.get('plan_version',0) or model.get('memory_revision',0)!=context.get('snapshot',{}).get('memory_revision',model.get('memory_revision',0))
         if current['ended'] or changed_problem or (not explicit and
-                (current['revision'] != snapshot or not current['proactive_enabled'] or context_changed)):
-            clear_pending_wake(db, sid)
+                (current['revision'] != snapshot or not observer_review.allowed(current)
+                 or current.get('assessment_pending') or current.get('pending_video') or context_changed)):
             workflow.outcome('discarded', 'Question, response or context changed', db=db)
             utils.METRICS['stale_interventions'] += 1
             return None
         if db.scalar(select(Event.id).where(Event.session_id == sid, Event.type == 'intervention',
                 Event.data['trigger_event_id'].as_integer() == job['event_id'])):
-            clear_pending_wake(db, sid)
             return None
         # Workspace highlight offsets must match delivery-time text even for explicit requests.
         if result['type'] == 'highlight' and response_for(current) != context['response']:
@@ -211,17 +184,17 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         append_event(db, sid, 'tool_call', {'name': result['type'], 'trigger_event_id': job['event_id'],
                                            'result': result})
         entry = append_event(db, sid, 'intervention', {**result, 'proactive': not explicit,
-                             'trigger_event_id': job['event_id'], 'revision': current['revision']})
+                             'trigger_event_id': job['event_id'], 'revision': current['revision'],
+                             'problem_id': current['current_problem']['id']})
         o = current['observer']
-        o.pop('pending_wake', None)
         o['last_intervention_at'] = utils.now()
-        o['intervention_response_key'] = content_key(response_for(current))
-        if result['type'] == 'hint':
-            o['hint_times'] = o.get('hint_times', [])[-9:] + [utils.now()]
+        previous = o.pop('pending_intervention', None)
+        if previous:
+            append_event(db, sid, 'intervention_closed', {'intervention_id': previous.get('event_id'),
+                'reward': None, 'evidence': 'A new intervention superseded the previous outcome window.'})
         if not explicit:
-            o.pop('pending_decision', None)
             o['pending_intervention'] = {'action': 'WAKE', 'event_id': entry.id,
-                'features': o.get('wake_features', {}), 'tool': result['type'], 'at': utils.now()}
+                'tool': result['type'], 'at': utils.now()}
         if needs_plan:
             current['plan'] = plan
             current['plan_version'] = current.get('plan_version', 0)+1
@@ -270,7 +243,9 @@ async def _assess(job):
         state.update(last_assessment={**result, 'event_id': entry.id},
             assessment_stages={'reflection': 'analyzing', 'hypotheses': 'waiting'})
         job['replan'] = bool(outcome and outcome['replan'])
-        job['decision'] = persist_observation(db, row, state, 'assessment', result)
+        persist_observation(db, row, state, 'assessment', result)
+        if not result['correct']:
+            job['incorrect_assessment_id'] = evidence_id
         job['revision'] = state['revision']
     # Assessment is committed before either optional model stage can fail.
     summary = None
@@ -370,15 +345,10 @@ async def _handle(job: dict) -> list[dict]:
                 outputs.append(plans.view(db.get(Session, sid).state))
     if job['kind'] == 'session_end':
         outputs.append({'type': 'session_summary', 'result': {'summary': 'Session ended. Answer reflections were saved during grading.', 'next_goal': 'Resume your learning when ready.'}})
-    from . import config
-    if job['kind'] != 'session_end' and (job['explicit'] or job.get('observer_approved') or (not config.OBSERVER_LLM_ENABLED and job['decision'] == 'WAKE')):
-        try:
-            result = await deliver_intervention(job, job['explicit'])
-            if result:
-                outputs.append(result)
-        finally:
-            with SessionLocal.begin() as db:
-                clear_pending_wake(db, sid)
+    if job['kind'] != 'session_end' and (job['explicit'] or job.get('observer_approved')):
+        result = await deliver_intervention(job, job['explicit'])
+        if result:
+            outputs.append(result)
     return outputs
 
 
