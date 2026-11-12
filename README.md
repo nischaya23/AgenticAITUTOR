@@ -37,7 +37,7 @@ Create an email/password account. Accounts own their materials, sessions, operat
 - Enter a topic description, level and goals; no upload is required. Ambiguous topics ask which meaning you intend.
 - Alternatively, upload up to ten text-based PDF, TXT or Markdown files. Each file is limited to 8 MiB; combined extracted text is limited to 600,000 characters. Scanned PDFs require OCR.
 - Research progress shows queries, candidate pages, selection/rejection reasons and supporting quotations. Accepted evidence is retained if a later research request fails.
-- The learning map shows concepts, prerequisites and evidence. Click an unlocked concept to focus on it.
+- The learning map shows concepts, prerequisites and any verified source quotes. Click an unlocked concept to focus on it.
 - Questions and student responses are text-only. Saved legacy diagrams are not editable; active diagram questions are replaced on resume without mastery credit.
 - Request hints, explanations, text review, guiding questions, visualizations or web search. Automatic help can be disabled in the workspace.
 - The Memory tab shows session context, long-term mastery, goals, reflections, hypotheses and misconceptions. Correct summaries/goals or dispute misconceptions without changing grades or deleting evidence.

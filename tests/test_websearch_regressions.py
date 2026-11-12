@@ -104,11 +104,12 @@ async def test_gemini_graph_uses_flat_transport_and_validates_evidence_locally(m
         return SimpleNamespace(usage=None,choices=[SimpleNamespace(finish_reason='stop',message=SimpleNamespace(parsed=wire))])
     monkeypatch.setattr(utils,'call_llm',REAL_CALL_LLM)
     monkeypatch.setattr(utils,'get_client',lambda:SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))))
-    if invalid:
+    if invalid == 'json':
         with pytest.raises(ValueError): await knowledge.extract_concepts([('TF-IDF notes',text)],focus='TF-IDF')
     else:
         result=await knowledge.extract_concepts([('TF-IDF notes',text)],focus='TF-IDF')
-        assert result.concepts==['TF-IDF'] and result.evidence[0].source_id=='D1'
+        assert result.concepts == ['TF-IDF']
+        assert [item.source_id for item in result.evidence] == ([] if invalid else ['D1'])
 
 
 async def test_bad_selection_quote_rejects_only_that_page(monkeypatch):
@@ -121,18 +122,24 @@ async def test_bad_selection_quote_rejects_only_that_page(monkeypatch):
     assert await websearch.relevant_pages(pages,'TF-IDF')==[pages[0]]
 
 
-async def test_graph_repairs_paraphrased_quotes_against_original_sources(monkeypatch):
+async def test_graph_keeps_uncited_concepts_and_drops_unsupported_quotes(monkeypatch):
     from backend import knowledge
     monkeypatch.setattr(config,'LLM_PROVIDER','openai')
     text='TF-IDF measures term importance in a document.'
-    bad=knowledge.ConceptGraph(concepts=['TF-IDF'],prerequisites=[],evidence=[dict(concept='TF-IDF',prerequisite='',source_id='D1',quote='Words get weighted by importance.')])
-    good=knowledge.ConceptGraph(concepts=['TF-IDF'],prerequisites=[],evidence=[dict(concept='TF-IDF',prerequisite='',source_id='D1',quote=text)])
-    model=AsyncMock(side_effect=[bad,good]);monkeypatch.setattr(utils,'call_llm',model)
+    generated = knowledge.ConceptGraph(
+        concepts=['Term frequency', 'TF-IDF'],
+        prerequisites=[dict(prerequisite='Term frequency', concept='TF-IDF')],
+        evidence=[dict(concept='TF-IDF', source_id='D1', quote=text),
+                  dict(concept='Term frequency', source_id='D1', quote='Words get weighted by importance.'),
+                  dict(concept='TF-IDF', prerequisite='Term frequency', source_id='D1')],
+    )
+    model = AsyncMock(return_value=generated)
+    monkeypatch.setattr(utils, 'call_llm', model)
     graph=await knowledge.extract_concepts([('TF-IDF',text)])
-    assert graph.evidence[0].quote==text
-    assert model.await_count==2
-    assert model.call_args.kwargs['operation']=='REPAIR_GRAPH_EVIDENCE'
-    assert model.call_args.args[1]['documents'][0]['text']==text
+    assert graph.concepts == ['Term frequency', 'TF-IDF']
+    assert graph.prerequisites == generated.prerequisites
+    assert [item.quote for item in graph.evidence] == [text]
+    model.assert_awaited_once()
 
 
 def test_graph_quote_normalization_returns_real_source_substring():

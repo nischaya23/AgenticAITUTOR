@@ -19,7 +19,7 @@ class GraphEvidence(utils.Schema):
     concept: str
     prerequisite: str = ''
     source_id: str
-    quote: str = Field(min_length=1, max_length=500)
+    quote: str | None = Field(default=None, max_length=500)
 
 class ConceptGraph(utils.Schema):
     concepts: list[str] = Field(max_length=30)
@@ -165,8 +165,9 @@ def extraction_input(documents: list[tuple[str, str]]) -> str:
 async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=None, context: dict | None=None, primary_count: int | None=None) -> ConceptGraph:
     instructions = prompts.EXTRACT_CONCEPTS_MULTI + (
         ' Build the graph around the requested subject. Fill missing prerequisites without broadening the subject. '
-        'For EVERY concept and prerequisite edge supply evidence: concept, prerequisite (empty for concept evidence), '
-        'source_id and exact short quote from the supplied document. Student goals guide scope, never factual correctness.')
+        'Include evidence when you can copy an exact short quote from a supplied document. Use concept, prerequisite '
+        '(empty for concept evidence), source_id and quote. Omit evidence entries when you cannot find a matching '
+        'passage. Student goals guide scope, never factual correctness.')
     from .context import bound
     primary_count = len(documents) if primary_count is None else primary_count
     def budget(index):
@@ -193,34 +194,20 @@ async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=N
             payload=bound({**payload,'previous_graph_json':getattr(result,'graph_json','')[:16000],
                 'repair_errors':['Return valid graph JSON. Escape quotations and preserve source text.']})
             continue
-        errors=[];valid=[]
+        valid = []
+        concepts = set(graph.concepts)
         for e in graph.evidence:
-            if e.source_id not in lookup or e.concept not in graph.concepts:
-                errors.append(f'{e.concept}: use a supplied source ID and an existing graph concept.')
+            if e.source_id not in lookup or e.concept not in concepts or not e.quote or not e.quote.strip():
                 continue
-            resolved=resolve_quote(lookup[e.source_id],e.quote)
-            if resolved is None:
-                errors.append(f'{e.concept} ({e.source_id}): quote must be a contiguous exact passage copied from that source, not a paraphrase.')
-            else:
-                e.quote=resolved
-                valid.append(e)
-        covered={(e.prerequisite,e.concept) for e in valid}
-        # Valid edge evidence also grounds its target concept; a duplicate node citation is unnecessary.
-        covered_concepts={e.concept for e in valid}
-        missing=[name for name in graph.concepts if name not in covered_concepts]
-        missing_edges=[e for e in graph.prerequisites if (e.prerequisite,e.concept) not in covered]
-        if not missing and not missing_edges:
-            if errors:
-                from .operations import progress
-                await progress('checking_evidence',message=f'Discarded {len(errors)} unsupported extra citations; every graph item retains valid source evidence.')
-            graph.evidence=valid
-            return graph
-        errors.append('Supply valid evidence for every concept and prerequisite; remove unsupported items.')
-        if not attempt:
+            quote = resolve_quote(lookup[e.source_id], e.quote)
+            if quote is not None:
+                valid.append(e.model_copy(update={'quote': quote}))
+        discarded = len(graph.evidence) - len(valid)
+        if discarded:
             from .operations import progress
-            await progress('checking_evidence',message='Checking graph citations and repairing unsupported quotations.')
-            payload=bound({**payload,'previous_graph':graph.model_dump(),'repair_errors':errors})
-    raise ValueError('The model could not substantiate graph concepts with source quotations. Please retry.')
+            await progress('checking_evidence', message=f'Discarded {discarded} unsupported graph citations.')
+        graph.evidence = valid
+        return graph
 
 
 def resolve_quote(source,quote):

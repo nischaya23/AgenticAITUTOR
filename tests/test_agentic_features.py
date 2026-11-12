@@ -156,6 +156,31 @@ def test_upload_reports_provider_unavailability(app_env, monkeypatch):
     assert job['error'] == 'Gemini is temporarily unavailable (HTTP 503). Try again shortly.'
 
 
+def test_upload_can_open_study_when_no_graph_quotes_match(app_env, monkeypatch):
+    from backend import knowledge
+
+    client, _, _ = app_env
+    monkeypatch.setattr(config, 'WEB_SEARCH_ON_UPLOAD', False)
+    original_model = utils.call_llm
+
+    async def model(*args, **kwargs):
+        if kwargs.get('operation') == 'EXTRACT_CONCEPTS':
+            return knowledge.ConceptGraph(concepts=['Search'], prerequisites=[], evidence=[
+                dict(concept='Search', source_id='D1', quote='This quote is absent.'),
+            ])
+        return await original_model(*args, **kwargs)
+
+    monkeypatch.setattr(utils, 'call_llm', model)
+    upload = client.post('/api/material-jobs', files={'files': ('notes.md', b'# Search\nSearch a sorted list.', 'text/markdown')})
+    oid = upload.json()['id']
+    job = wait_job(client, oid)
+    assert job['status'] == 'ready'
+    sid = client.post('/api/sessions', json={'preparation_id': oid}).json()['id']
+    study = client.post(f'/api/sessions/{sid}/study', json={'material_id': job['result']['id']})
+    assert study.status_code == 200, study.text
+    assert study.json()['material']['graph']['evidence'] == []
+
+
 async def test_research_uses_native_tool_results_and_respects_budget(monkeypatch):
     calls=[]
     async def model(instructions,data,**kwargs):
