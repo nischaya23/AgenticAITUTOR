@@ -11,7 +11,7 @@ import Workspace, { annotationRange } from './Workspace';
 import { FlowGraph } from './Visualization';
 import MemoryPanel from './Memory';
 import { PreparationPanel, VideoPlayer, VideoJob } from './Progress';
-import Workflow, { type WorkflowEvent } from './Workflow';
+import ActivityFlow, { updateTutorFlow, type TutorStep, type WorkflowEvent } from './ActivityFlow';
 import type { Annotation, Assessment, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool, ProgressEvent } from './types';
 import '../styles.css';
 
@@ -39,7 +39,6 @@ type Message = Study | PlanState | {
   | { type: 'ack'; workflow_run_id?: string; event_id: number; event_type: string; action: string; revision: number; response_revision?: number; content?: string }
   | ({ type: 'observer_status' } & Observer)
   | { type: 'busy'; active: boolean }
-  | { type: 'workflow_tracking'; tracking: string }
   | { type: 'workflow_events'; events: WorkflowEvent[]; watermark: number }
   | { type: 'session_summary'; result: { summary: string; next_goal: string } }
   | { type: 'memory_changed' }
@@ -75,8 +74,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const [busy, setBusy] = useState(false);
   const [chat, setChat] = useState('');
   const [assessment, setAssessment] = useState('');
-  const [workflowIncomplete, setWorkflowIncomplete] = useState(false);
-  const [workflowBatch, setWorkflowBatch] = useState<WorkflowEvent[]>([]);
+  const [tutorSteps, setTutorSteps] = useState<TutorStep[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [summary, setSummary] = useState('');
@@ -89,6 +87,13 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const responseRevision = useRef(0);
   const pendingEdits = useRef(0);
   const editTimer = useRef<number | undefined>(undefined);
+  const conversation = useRef<HTMLDivElement>(null);
+  const conversationAtBottom = useRef(true);
+
+  useEffect(() => {
+    const element = conversation.current;
+    if (element && conversationAtBottom.current) element.scrollTop = element.scrollHeight;
+  }, [history.length, study?.material.id]);
 
   function send(event: object) {
     if (ws.current?.readyState !== WebSocket.OPEN) {
@@ -184,8 +189,9 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     switch (message.type) {
       case 'memory_changed': setMemoryVersion(value => value + 1); break;
       case 'research_progress': break;
-      case 'workflow_tracking': setWorkflowIncomplete(message.tracking === 'incomplete'); break;
-      case 'workflow_events': setWorkflowBatch(message.events); break;
+      case 'workflow_events':
+        setTutorSteps(steps => updateTutorFlow(steps, message.events));
+        break;
       case 'video_pending': setVideoJobs(items => [...items, {id: message.operation_id, title: message.title}]); break;
       case 'memory_activity': break;
       case 'plan': applyPlan(message); break;
@@ -297,6 +303,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         if (stopped || ws.current !== socket) return;
         setConnected(false);
         setBusy(false);
+        setTutorSteps([]);
         if (event.code === 1008) {
           window.dispatchEvent(new Event(authExpired));
           return;
@@ -321,20 +328,24 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   }, [sid, uploading]);
 
   const [topic, setTopic] = useState('');
-  const [preparation, setPreparation] = useState<string | null>(() => !initialSession ? sessionStorage.getItem('studyroom-job-' + user.id) : null);
+  const [preparation, setPreparation] = useState<{id: string | null; upload: boolean} | null>(null);
   const [videoJobs, setVideoJobs] = useState<{id: string; title: string}[]>([]);
   const [memoryVersion, setMemoryVersion] = useState(0);
 
   async function startPreparation(files?: File[]) {
     setUploading(true); onUploadChange(true); setNotice('');
+    const upload = Boolean(files);
+    setPreparation({id: null, upload});
     try {
       let job: {id: string};
       if (files) {
         const form = new FormData(); files.forEach(file => form.append('files', file));
         job = await api('/api/material-jobs', {method: 'POST', body: form});
       } else job = await post('/api/material-jobs/topic', {description: topic.trim()});
-      sessionStorage.setItem('studyroom-job-' + user.id, job.id); setPreparation(job.id);
-    } catch (error) { setNotice((error as Error).message); setUploading(false); onUploadChange(false); }
+      setPreparation({id: job.id, upload});
+    } catch (error) {
+      setPreparation(preparation); setNotice((error as Error).message); setUploading(false); onUploadChange(false);
+    }
   }
 
   async function openPrepared(materialId: string) {
@@ -342,9 +353,9 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     try {
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: materialId });
-      setHistory([]); setChat(''); setSummary(''); setAssessment(''); setWorkflowBatch([]);
+      setHistory([]); setChat(''); setSummary(''); setAssessment(''); setTutorSteps([]);
       revision.current = 0; applyStudy(next, session.id); setSid(session.id); onCreated(session.id);
-      setPreparation(null); sessionStorage.removeItem('studyroom-job-' + user.id);
+      setPreparation(null);
     } catch (error) { setNotice((error as Error).message); }
     finally { setUploading(false); onUploadChange(false); onSessionsChange(); }
   }
@@ -352,13 +363,17 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   function ask(content: string) {
     if (disabled || busy || !content.trim() || !flushEdits()) return;
     if (send({ type: 'student_message', content: content.trim() })) {
+      setTutorSteps([]);
       setBusy(true);
       setChat('');
     }
   }
 
   function requestTool(tool: Tool) {
-    if (!disabled && !busy && flushEdits() && send({ type: 'student_action', action: 'hint_request', tool })) setBusy(true);
+    if (!disabled && !busy && flushEdits() && send({ type: 'student_action', action: 'hint_request', tool })) {
+      setTutorSteps([]);
+      setBusy(true);
+    }
   }
 
   function submit(event: FormEvent) {
@@ -366,6 +381,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     const response = responseValue();
     if (!response.text.trim() || disabled || !flushEdits()) return;
     if (send({ type: 'problem_attempt', response, problem_id: problem?.id })) {
+      setTutorSteps([]);
       setPending(true); markDraft('analyzing');
     }
   }
@@ -409,6 +425,24 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const choosing = uploading || !connected || pending || busy || Boolean(study?.state.ended || study?.state.assessment_pending);
   const activeNode = study?.graph.nodes.find(node => node.active);
   const mastery = activeNode?.mastery;
+  const tutorStatus = study?.state.ended ? 'Session ended' : study?.state.study_complete ? 'Learning target reached'
+    : !connected ? 'Connecting…' : 'Ready when you are';
+  const showTutorFlow = connected && !inactive && (tutorSteps.length > 0 || busy || pending);
+
+  function renderMessage(item: HistoryItem) {
+    if (item.type === 'student_message') {
+      return <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>;
+    }
+    return <article className="intervention" key={item.id}>
+      <Intervention result={item.data} />
+      {observer.feedback_intervention_id === item.id && !inactive &&
+        <div className="player-controls">{([1, -1] as const).map(rating =>
+          <button type="button" key={rating} disabled={!connected || busy} onClick={() => {
+            if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
+              ({ ...status, feedback_intervention_id: null }));
+          }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
+    </article>;
+  }
 
   return <MotionConfig reducedMotion="user">
     <div className="mobile-toolbar">
@@ -436,7 +470,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           </form>
           <p className="muted">Or start from your own notes</p>
           <label className="upload upload-card">
-            <Icon name="upload" /><span>{uploading ? 'Preparing your session…' : 'Choose files'}</span>
+            <Icon name="upload" /><span>Choose files</span>
             <input id="upload" type="file" accept=".pdf,.txt,.md" multiple disabled={uploading}
               onChange={event => {
                 const files = Array.from(event.target.files ?? []);
@@ -446,7 +480,8 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           </label>
           <p className="muted">PDF, Markdown, or text</p>
         </>}
-        {preparation && <PreparationPanel id={preparation} onReady={openPrepared} onWaiting={()=>{setUploading(false);onUploadChange(false);}} />}
+        {preparation && <PreparationPanel key={preparation.id ?? 'starting'} id={preparation.id} upload={preparation.upload}
+          onReady={openPrepared} onWaiting={()=>{setUploading(false);onUploadChange(false);}} />}
       </section> : <>
       <div className="study-dock">
         <div className="dock-tabs" role="tablist" aria-label="Study tools" onKeyDown={event => {
@@ -479,10 +514,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
             const enabled=event.target.checked;
             if(send({type:'preferences',proactive_enabled:enabled})) applyStudy({...study,state:{...study.state,proactive_enabled:enabled}});
           }} />Offer automatic help</label>
-        <details className="observer-panel"><summary>Tutor activity</summary>
-          <div id="observer-status" role="status">{observer.reason ?? 'Waiting for activity'}</div>
-          {observer.baseline_decision && <p>Numerical recommendation: {observer.baseline_decision} · Final decision: {observer.decision} · {label(observer.decision_source ?? 'baseline')}</p>}
-          <details><summary>Activity details</summary><pre>{JSON.stringify(observer, null, 2)}</pre></details></details>
+        {observer.reason && <p className="muted" id="observer-status">{observer.reason}</p>}
         {sid && study && <details className="plan-details"><summary>Your learning plan</summary><LearningPlanPanel key={sid + ':' + study.material.id} sessionId={sid}
           value={{ type: 'plan', plan: study.state.plan ?? {}, plan_version: study.state.plan_version ?? 0, plan_suggestion: study.state.plan_suggestion }}
           disabled={!connected || uploading || study.state.ended} onChange={value => { if(current.current?.material.id === study.material.id) applyPlan(value); }} /></details>}
@@ -555,30 +587,25 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         {sid && <MemoryPanel sessionId={sid} active={studyTab === 'memory'} version={memoryVersion} />}
       </section>
       </div>
-        <section className="panel chat chat-panel" aria-label="Agentic workflow">
+        <section className="panel chat chat-panel" aria-label="Tutor chat">
           <div className="conversation-heading"><span className="tutor-avatar"><Icon name="spark" /></span>
-            <div><h2>Agentic workflow</h2><p><span className={'status-dot' + (connected && !inactive ? ' online' : '')} />
-              {study.state.ended ? 'Session ended' : study.state.study_complete ? 'Learning target reached'
-                : connected ? 'Ready when you are' : 'Connecting…'}</p></div></div>
-          {sid && <Workflow sessionId={sid} connected={connected} batch={workflowBatch} trackingIncomplete={workflowIncomplete}
-            messageIds={history.map(item => item.id)} messageRuns={Object.fromEntries(history.map(item => [item.id,item.workflow_run_id]))}
-            renderMessage={id => { const item = history.find(entry => entry.id === id); return item ? (
-              item.type === 'student_message'
-              ? <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>
-              : <article className="intervention" key={item.id}>
-                <Intervention result={item.data} />
-                {observer.feedback_intervention_id === item.id && !inactive &&
-                  <div className="player-controls">{([1, -1] as const).map(rating =>
-                    <button type="button" key={rating} disabled={!connected || busy} onClick={() => {
-                      if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
-                        ({ ...status, feedback_intervention_id: null }));
-                    }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
-              </article>) : null; }}
-            empty={!history.length ? (<div className="conversation-welcome"><Icon name="chat" />
+            <div><h2>Tutor chat</h2>{!showTutorFlow && <p role="status"><span className={'status-dot' + (connected && !inactive ? ' online' : '')} />
+              {tutorStatus}</p>}</div>
+          </div>
+          {showTutorFlow && <ActivityFlow label="Tutor progress"
+            steps={tutorSteps.length ? tutorSteps : [{ id: 'working', label: 'Working on your request', state: 'working' }]} />}
+          <div id="interventions" ref={conversation} role="log" aria-live="polite"
+            onScroll={event => {
+              const element = event.currentTarget;
+              conversationAtBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+            }}>
+            {!history.length && !videoJobs.length && <div className="conversation-welcome"><Icon name="chat" />
               <h3>Let’s work through it.</h3><p>Ask about {study.state.current_concept}, request a hint, or try the question in your workspace.</p>
               <button type="button" disabled={disabled || busy} onClick={() => requestTool('guiding_question')}>Help me get started<Icon name="arrow" /></button>
-            </div>) : null}
-            extras={<>{videoJobs.map(job => <VideoJob key={job.id} id={job.id} title={job.title} />)}</>} />}
+            </div>}
+            {history.map(renderMessage)}
+            {videoJobs.map(job => <VideoJob key={job.id} id={job.id} title={job.title} />)}
+          </div>
           <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(chat); }}>
             <label className="sr-only" htmlFor="chat">Ask your tutor</label>
             <textarea id="chat" rows={2} placeholder="Ask a question, or tell me where you’re stuck…"
