@@ -11,3 +11,4 @@ data/materials/*.pdf
 data/materials/*.txt
 
 tmp/
+data/videos/

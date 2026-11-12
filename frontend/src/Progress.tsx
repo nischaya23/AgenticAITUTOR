@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Workflow from './Workflow';
 import type { Operation, ProgressEvent, Video } from './types';
 
 async function request<T>(path: string, body?: object): Promise<T> {
@@ -12,17 +13,18 @@ function useOperation(id: string) {
   const [state,setState] = useState<Operation | null>(null);
   const [error,setError] = useState('');
   const [refresh,setRefresh] = useState(0);
+  const [version,setVersion] = useState(0);
   useEffect(() => {
     let stopped=false, stream: EventSource | undefined, timer: ReturnType<typeof setTimeout>;
     async function read() {
       try {
         const next=await request<Operation>('/api/operations/'+id);
         if (stopped) return;
-        setState(next);setError('');
+        setState(next);setVersion(value=>value+1);setError('');
         if (next.status !== 'running') {stream?.close();return;}
         if (!stream && typeof EventSource !== 'undefined') {
           const after=next.events.at(-1)?.id ?? 0;
-          stream=new EventSource('/api/operations/'+id+'/events?after='+after);
+          stream=new EventSource('/api/operations/'+id+'/events?after='+after+'&workflow_after=0');
           stream.onmessage=() => {void read();};
           stream.onerror=() => {stream?.close();stream=undefined;clearTimeout(timer);timer=setTimeout(read,2000);};
         } else if (!stream) timer=setTimeout(read,1000);
@@ -31,7 +33,7 @@ function useOperation(id: string) {
     void read();
     return () => {stopped=true;stream?.close();clearTimeout(timer);};
   },[id,refresh]);
-  return {state,error,reload:()=>setRefresh(x=>x+1)};
+  return {state,error,version,reload:()=>setRefresh(x=>x+1)};
 }
 
 export function ResearchTimeline({events}: {events:ProgressEvent[]}) {
@@ -46,7 +48,7 @@ export function ResearchTimeline({events}: {events:ProgressEvent[]}) {
 }
 
 export function PreparationPanel({id,onReady,onWaiting}: {id:string;onReady:(materialId:string)=>Promise<void>;onWaiting?:()=>void}) {
-  const {state,error,reload}=useOperation(id);
+  const {state,error,reload,version}=useOperation(id);
   const opened=useRef('');
   const [notice,setNotice]=useState('');
   const [acting,setActing]=useState(false);
@@ -62,7 +64,7 @@ export function PreparationPanel({id,onReady,onWaiting}: {id:string;onReady:(mat
   },[state,id,onReady]);
   return <section className="preparation-panel" aria-label="Learning preparation">
     <p role="status">{state?.status==='running' ? 'Preparing your learning map…' : state?.status?.replaceAll('_',' ') ?? 'Connecting to preparation…'}</p>
-    <ResearchTimeline events={state?.events ?? []} />
+    <h2>Agentic workflow</h2><Workflow operationId={id} refreshKey={version} />
     {state?.status==='needs_clarification' && <div><p>Which subject do you mean?</p>
       {state.result?.meanings?.map((meaning,index)=><button type="button" key={index} disabled={acting}
         onClick={()=>void act('/api/material-jobs/'+id+'/meaning',{index})}>{meaning.label} — {meaning.description}</button>)}</div>}

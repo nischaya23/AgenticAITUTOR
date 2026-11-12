@@ -6,9 +6,9 @@ from types import SimpleNamespace
 from collections import Counter
 from functools import lru_cache
 from typing import Literal
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from . import config, prompts, logging_setup as logs
+from . import workflow, config, prompts, logging_setup as logs
 from .response import Schema, Response
 
 METRICS = Counter()
@@ -69,16 +69,33 @@ class StudentData(BaseModel):
     student_goals: list[str] = Field(default_factory=list)
 
 
+async def provider_request(request):
+    # SDK retry metadata is read locally; headers, URLs and credentials are never stored.
+    count = request.headers.get('x-stainless-retry-count', '0')
+    workflow.record('provider.attempt', status='running', attempt=int(count)+1 if count.isdigit() else 1)
+
+
+async def provider_response(response):
+    count = response.request.headers.get('x-stainless-retry-count', '0')
+    workflow.record('provider.response', status='warnings' if response.status_code >= 400 else 'completed',
+        attempt=int(count)+1 if count.isdigit() else 1, http_status=response.status_code,
+        retryable=response.status_code in (408, 409, 429) or response.status_code >= 500)
+
+
+def provider_transport():
+    return DefaultAsyncHttpxClient(event_hooks={'request': [provider_request], 'response': [provider_response]})
+
+
 @lru_cache
 def get_client() -> AsyncOpenAI:
     if config.LLM_PROVIDER == "gemini":
         if not config.GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY is missing.")
 
-        return AsyncOpenAI(api_key=config.GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", timeout=config.API_TIMEOUT, max_retries=2,)
+        return AsyncOpenAI(api_key=config.GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", timeout=config.API_TIMEOUT, max_retries=2, http_client=provider_transport())
     if not config.OPENAI_API_KEY:
         raise RuntimeError('Configure OPENAI_API_KEY in .env.')
-    return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=config.API_TIMEOUT, max_retries=2)
+    return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=config.API_TIMEOUT, max_retries=2, http_client=provider_transport())
 
 
 
@@ -122,6 +139,7 @@ async def _call_llm(
 
         timeout = config.API_TIMEOUT * 3 + 5
         history = kwargs.pop("tool_history", [])
+        workflow.model_context(input_data, history)
         wants_tools = bool(kwargs.get("tools"))
         output_budget = max_output_tokens if max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
@@ -163,6 +181,7 @@ async def _call_llm(
             logs.event('llm.response', prompt=operation, response=response)
 
             if response.usage:
+                workflow.record('model.usage', 'agents', input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens)
                 METRICS["input_tokens"] += response.usage.input_tokens
                 METRICS["output_tokens"] += response.usage.output_tokens
 
@@ -244,6 +263,7 @@ async def _call_llm(
         logs.event('llm.response', prompt=operation, response=response)
 
         if response.usage:
+            workflow.record('model.usage', 'agents', input_tokens=response.usage.prompt_tokens, output_tokens=response.usage.completion_tokens)
             METRICS["input_tokens"] += (
                 response.usage.prompt_tokens or 0
             )
@@ -322,5 +342,13 @@ _PROVIDER_LIMITS = {}
 async def call_llm(*args, **kwargs):
     loop = asyncio.get_running_loop()
     limiter = _PROVIDER_LIMITS.setdefault(loop, asyncio.Semaphore(config.PROVIDER_CONCURRENCY))
-    async with limiter:
-        return await _call_llm(*args, **kwargs)
+    with workflow.span('Provider slot', 'agents', status_label='Waiting for model'):
+        queued_at = time.perf_counter()
+        await limiter.acquire()
+        workflow.record('model.slot_acquired', queue_ms=round((time.perf_counter()-queued_at)*1000, 2))
+    try:
+        with workflow.span(kwargs.get('operation') or 'Model request', 'agents',
+                provider=config.LLM_PROVIDER, model=kwargs.get('model') or (config.GEMINI_MODEL if config.LLM_PROVIDER == 'gemini' else config.OPENAI_MODEL)):
+            return await _call_llm(*args, **kwargs)
+    finally:
+        limiter.release()

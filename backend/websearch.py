@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, unquote, urljoin, urlparse
 import httpx
 from pydantic import Field
 
-from . import config, prompts, utils, operations, logging_setup as logs
+from . import workflow, config, prompts, utils, operations, logging_setup as logs
 
 # Wikimedia requires a descriptive User-Agent with a contact URL or address.
 USER_AGENT = f'StudyroomTutor/1.0 ({config.WEB_SEARCH_CONTACT}) python-httpx'
@@ -138,6 +138,7 @@ async def _fetch_page_content(client: httpx.AsyncClient, url: str) -> dict | Non
     return None
 
 
+@workflow.stage('Research · Fetch source', 'tools', capture=False)
 async def _fetch_page(client, url):
     await operations.progress('candidate', url=url, message='Checking public page and readable content.')
     try:
@@ -245,6 +246,7 @@ class Relevance(utils.Schema):
     decisions: list[SelectionReason] = Field(default_factory=list, max_length=10)
 
 
+@workflow.stage('Knowledge · Interpret topic', 'agents')
 async def interpret_topic(topic: str, learning_context=None) -> list[Meaning]:
     """The study meanings of a topic, most likely first; several only when it is ambiguous."""
     result = await utils.call_llm(prompts.TOPIC_MEANINGS, {'topic': topic, 'learning_context': learning_context or {}}, schema=TopicMeanings,
@@ -252,6 +254,7 @@ async def interpret_topic(topic: str, learning_context=None) -> list[Meaning]:
     return result.meanings
 
 
+@workflow.stage('Research · Select evidence', 'tools')
 async def relevant_pages(pages: list[dict], subject: str) -> list[dict]:
     """Drop pages that are not about the subject, e.g. "Durag" when studying retrieval-augmented generation."""
     if not pages:
@@ -274,6 +277,7 @@ async def relevant_pages(pages: list[dict], subject: str) -> list[dict]:
     return [page for i, page in enumerate(pages) if i in keep]
 
 
+@workflow.stage('Research · Search', 'tools')
 async def search(query: str, max_pages: int | None = None) -> list[dict]:
     """Return [{title, url, text}] for the query. Raises WebSearchError when nothing usable is found."""
     query = ' '.join(query.split())[:200]

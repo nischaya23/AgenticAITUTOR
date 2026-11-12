@@ -1,6 +1,6 @@
 """Grounded teaching, terminating in one validated intervention function call."""
 from pydantic import ValidationError
-from . import prompts, config, tools, utils
+from . import workflow, prompts, config, tools, utils
 
 async def execute_intervention(selection: dict, context: dict) -> dict:
     kind = selection['action']
@@ -14,6 +14,7 @@ async def execute_intervention(selection: dict, context: dict) -> dict:
         instructions += SCRIPT_INSTRUCTIONS
     payload = {'selection': selection, 'context': context}
     for attempt in range(2 if kind == 'visualization' else 1):
+        workflow.record('script.attempt', 'tools', attempt=attempt+1, tool=kind)
         response = await utils.call_llm(instructions, payload,
             tools=[tools.function_definition(kind)], tool_choice={'type': 'function', 'name': kind},
             parallel_tool_calls=False, max_output_tokens=6000 if kind == 'visualization' else None,
@@ -27,7 +28,9 @@ async def execute_intervention(selection: dict, context: dict) -> dict:
         except (ValidationError, ValueError) as exc:
             if kind != 'visualization' or attempt:
                 raise
+            workflow.record('validation.repair', 'tools', 'warnings', attempt=attempt+1, message='Repairing animation validation errors')
             payload = {**payload, 'repair_error': str(exc)[:1500], 'previous_arguments': calls[0].arguments}
 
+@workflow.stage('Tutor · Generate response', 'agents')
 async def respond_to_student(context: dict, selection: dict) -> dict:
     return await execute_intervention(selection, context)

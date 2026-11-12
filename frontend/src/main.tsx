@@ -10,7 +10,8 @@ import Hypotheses from './Hypotheses';
 import Workspace, { annotationRange } from './Workspace';
 import { FlowGraph } from './Visualization';
 import MemoryPanel from './Memory';
-import { PreparationPanel, ResearchTimeline, VideoPlayer, VideoJob } from './Progress';
+import { PreparationPanel, VideoPlayer, VideoJob } from './Progress';
+import Workflow, { type WorkflowEvent } from './Workflow';
 import type { Annotation, Assessment, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool, ProgressEvent } from './types';
 import '../styles.css';
 
@@ -31,13 +32,15 @@ function post<T>(path: string, data: object) {
 
 type Message = Study | PlanState | {
   plan?: PlanState['plan']; plan_version?: number; plan_suggestion?: PlanState['plan_suggestion'];
-  type: 'intervention'; event_id: number; proactive: boolean; result: Result; revision: number;
+  workflow_run_id?: string; type: 'intervention'; event_id: number; proactive: boolean; result: Result; revision: number;
 } | { type: 'assessment'; result: Assessment; stages?: { reflection: string; hypotheses: string } }
   | { type: 'hypotheses'; state: HypothesisState }
   | { type: 'memory_activity'; items: { message: string }[] }
-  | { type: 'ack'; event_id: number; event_type: string; action: string; revision: number; response_revision?: number; content?: string }
+  | { type: 'ack'; workflow_run_id?: string; event_id: number; event_type: string; action: string; revision: number; response_revision?: number; content?: string }
   | ({ type: 'observer_status' } & Observer)
   | { type: 'busy'; active: boolean }
+  | { type: 'workflow_tracking'; tracking: string }
+  | { type: 'workflow_events'; events: WorkflowEvent[]; watermark: number }
   | { type: 'session_summary'; result: { summary: string; next_goal: string } }
   | { type: 'memory_changed' }
   | ({ type: 'research_progress' } & ProgressEvent)
@@ -50,7 +53,7 @@ function Intervention({ result }: { result: Result }) {
     <strong>{label(result.type)}</strong><p>{result.content}</p>
     {metadata.video && <VideoPlayer video={metadata.video} />}
     {!metadata.video && (metadata.nodes || 'visualization' in metadata) && <p className="muted">Earlier animation archived. Request a new video to see this topic.</p>}
-    {metadata.retrieved_sources?.length ? <details><summary>Sources consulted</summary><ul>{metadata.retrieved_sources.map(source =>
+    {metadata.retrieved_sources?.length ? <details><summary>Retrieved sources</summary><ul>{metadata.retrieved_sources.map(source =>
       <li key={source.id}>{source.url ? <a href={source.url} target="_blank" rel="noopener noreferrer">{source.source}</a> : source.source}</li>)}</ul></details> : null}
   </>;
 }
@@ -72,7 +75,8 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const [busy, setBusy] = useState(false);
   const [chat, setChat] = useState('');
   const [assessment, setAssessment] = useState('');
-  const [memoryActivity, setMemoryActivity] = useState('');
+  const [workflowIncomplete, setWorkflowIncomplete] = useState(false);
+  const [workflowBatch, setWorkflowBatch] = useState<WorkflowEvent[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [summary, setSummary] = useState('');
@@ -85,12 +89,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   const responseRevision = useRef(0);
   const pendingEdits = useRef(0);
   const editTimer = useRef<number | undefined>(undefined);
-  const conversation = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const element = conversation.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [history.length, busy, study?.material.id]);
 
   function send(event: object) {
     if (ws.current?.readyState !== WebSocket.OPEN) {
@@ -133,7 +131,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
 
   function applyStudy(view: Study, sessionId = sid) {
     const previous = current.current;
-    if(previous?.material.id !== view.material.id){setResearchEvents([]);setVideoJobs([]);}
+    if(previous?.material.id !== view.material.id){setVideoJobs([]);}
     if(view.state.last_video_operation) setVideoJobs(items => items.some(item=>item.id===view.state.last_video_operation) ? items : [...items,{id:view.state.last_video_operation!,title:'Learning animation'}]);
     const serverResponse = { text: view.state.response?.text ?? view.state.workspace };
     if(previous?.material.id === view.material.id && (previous.state.plan_version ?? 0) > (view.state.plan_version ?? 0)){
@@ -185,9 +183,11 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
   function onMessage(message: Message) {
     switch (message.type) {
       case 'memory_changed': setMemoryVersion(value => value + 1); break;
-      case 'research_progress': setResearchEvents(items => [...items.slice(-99), message]); break;
+      case 'research_progress': break;
+      case 'workflow_tracking': setWorkflowIncomplete(message.tracking === 'incomplete'); break;
+      case 'workflow_events': setWorkflowBatch(message.events); break;
       case 'video_pending': setVideoJobs(items => [...items, {id: message.operation_id, title: message.title}]); break;
-      case 'memory_activity': setMemoryActivity(message.items.map(item => item.message).join(' ')); break;
+      case 'memory_activity': break;
       case 'plan': applyPlan(message); break;
       case 'hypotheses':
         if (current.current && message.state.question_id === current.current.state.current_problem.id
@@ -212,7 +212,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           if (!pendingEdits.current && JSON.stringify(responseValue()) === sent.current) localStorage.removeItem(draftPrefix + sid);
         }
         if (message.event_type === 'student_message' && message.content) {
-          appendHistory({ id: message.event_id, type: 'student_message', data: { content: message.content } });
+          appendHistory({ id: message.event_id, workflow_run_id: message.workflow_run_id, type: 'student_message', data: { content: message.content } });
         }
         break;
       case 'intervention': {
@@ -225,7 +225,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           const items = result.metadata.annotations ?? [];
           setAnnotations(items.every(item => annotationRange(workspace.current, item)) ? items : []);
         }
-        appendHistory({ id: message.event_id, type: 'intervention',
+        appendHistory({ id: message.event_id, workflow_run_id: message.workflow_run_id, type: 'intervention',
           data: { ...result, proactive: message.proactive } });
         break;
       }
@@ -270,7 +270,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     function connect() {
       pendingEdits.current = 0;
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const socket = new WebSocket(protocol + '//' + location.host + '/ws/' + sid);
+      const socket = new WebSocket(protocol + '//' + location.host + '/ws/' + sid + '?workflow=1');
       ws.current = socket;
       socket.onmessage = event => { if (!stopped && ws.current === socket) onMessage(JSON.parse(event.data)); };
       socket.onopen = async () => {
@@ -322,7 +322,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
 
   const [topic, setTopic] = useState('');
   const [preparation, setPreparation] = useState<string | null>(() => !initialSession ? sessionStorage.getItem('studyroom-job-' + user.id) : null);
-  const [researchEvents, setResearchEvents] = useState<ProgressEvent[]>([]);
   const [videoJobs, setVideoJobs] = useState<{id: string; title: string}[]>([]);
   const [memoryVersion, setMemoryVersion] = useState(0);
 
@@ -343,7 +342,7 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
     try {
       const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: materialId });
-      setHistory([]); setChat(''); setSummary(''); setAssessment(''); setMemoryActivity('');
+      setHistory([]); setChat(''); setSummary(''); setAssessment(''); setWorkflowBatch([]);
       revision.current = 0; applyStudy(next, session.id); setSid(session.id); onCreated(session.id);
       setPreparation(null); sessionStorage.removeItem('studyroom-job-' + user.id);
     } catch (error) { setNotice((error as Error).message); }
@@ -515,7 +514,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
           }}>Retry next question</button></div>}
         <button id="skip" className="text-button" type="button" disabled={disabled || busy} onClick={skip}>Skip question</button>
         <p id="assessment" aria-live="polite">{assessment}</p>
-        {memoryActivity && <details className="memory-notice"><summary>Learning update</summary><p>{memoryActivity}</p></details>}
         {study && !study.state.ended && <button type="button" disabled={!connected || pending || busy || uploading}
           onClick={() => { if (flushEdits() && send({ type: 'session_end' })) setPending(true); }}>End session</button>}
         {summary && <p role="status">{summary}</p>}
@@ -557,17 +555,15 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
         {sid && <MemoryPanel sessionId={sid} active={studyTab === 'memory'} version={memoryVersion} />}
       </section>
       </div>
-        <section className="panel chat chat-panel" aria-label="Tutor chat">
+        <section className="panel chat chat-panel" aria-label="Agentic workflow">
           <div className="conversation-heading"><span className="tutor-avatar"><Icon name="spark" /></span>
-            <div><h2>Tutor chat</h2><p><span className={'status-dot' + (connected && !inactive ? ' online' : '')} />
+            <div><h2>Agentic workflow</h2><p><span className={'status-dot' + (connected && !inactive ? ' online' : '')} />
               {study.state.ended ? 'Session ended' : study.state.study_complete ? 'Learning target reached'
                 : connected ? 'Ready when you are' : 'Connecting…'}</p></div></div>
-          <div ref={conversation} id="interventions" role="log" aria-live="polite">
-            {!history.length && <div className="conversation-welcome"><Icon name="chat" />
-              <h3>Let’s work through it.</h3><p>Ask about {study.state.current_concept}, request a hint, or try the question in your workspace.</p>
-              <button type="button" disabled={disabled || busy} onClick={() => requestTool('guiding_question')}>Help me get started<Icon name="arrow" /></button>
-            </div>}
-            {history.map(item => item.type === 'student_message'
+          {sid && <Workflow sessionId={sid} connected={connected} batch={workflowBatch} trackingIncomplete={workflowIncomplete}
+            messageIds={history.map(item => item.id)} messageRuns={Object.fromEntries(history.map(item => [item.id,item.workflow_run_id]))}
+            renderMessage={id => { const item = history.find(entry => entry.id === id); return item ? (
+              item.type === 'student_message'
               ? <article className="student-message" key={item.id}><strong>You</strong><p>{item.data.content}</p></article>
               : <article className="intervention" key={item.id}>
                 <Intervention result={item.data} />
@@ -577,11 +573,12 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
                       if (send({ type: 'feedback', intervention_id: item.id, rating })) setObserver(status =>
                         ({ ...status, feedback_intervention_id: null }));
                     }}>{rating === 1 ? 'Helpful' : 'Not helpful'}</button>)}</div>}
-              </article>)}
-          </div>
-          {researchEvents.length > 0 && <ResearchTimeline events={researchEvents} />}
-          {videoJobs.map(job => <VideoJob key={job.id} id={job.id} title={job.title} />)}
-          {busy && <p id="busy" role="status">Your tutor is working…</p>}
+              </article>) : null; }}
+            empty={!history.length ? (<div className="conversation-welcome"><Icon name="chat" />
+              <h3>Let’s work through it.</h3><p>Ask about {study.state.current_concept}, request a hint, or try the question in your workspace.</p>
+              <button type="button" disabled={disabled || busy} onClick={() => requestTool('guiding_question')}>Help me get started<Icon name="arrow" /></button>
+            </div>) : null}
+            extras={<>{videoJobs.map(job => <VideoJob key={job.id} id={job.id} title={job.title} />)}</>} />}
           <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(chat); }}>
             <label className="sr-only" htmlFor="chat">Ask your tutor</label>
             <textarea id="chat" rows={2} placeholder="Ask a question, or tell me where you’re stuck…"

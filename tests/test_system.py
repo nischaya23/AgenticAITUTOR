@@ -38,7 +38,7 @@ def stalled(factory, sid):
 def test_tables_fk_append_only_and_restart(app_env):
     client, factory, engine = app_env
     sid = create(client)
-    assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges','logins','materials','memory_items','operations','operation_events'}
+    assert set(inspect(engine).get_table_names()) == {'users','sessions','events','student_state','concepts','concept_edges','logins','materials','memory_items','operations','operation_events','workflow_runs','workflow_spans','workflow_events','workflow_artifacts'}
     with factory.begin() as connection:
         row = connection.get(db.Session, sid)
         memory.update_long_term_memory(connection, row.user_id, {'memories':['I prefer invariants.']})

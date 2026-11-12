@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 from pydantic import Field, model_validator
-from . import config, operations, utils
+from . import workflow, config, operations, utils
 
 SCRIPT_INSTRUCTIONS = '''
 Write executable Python with exactly one public entry point def draw_frame(canvas, t):.
@@ -60,6 +60,7 @@ def directory(user_id):
 
 _LOCKS = {}
 
+@workflow.stage('Visualization · Render video', 'tools')
 async def render(script: VideoScript, user_id):
     identity=(asyncio.get_running_loop(),str(config.DATA_DIR),user_id,script.model_dump_json())
     lock=_LOCKS.setdefault(identity,asyncio.Lock())
@@ -77,6 +78,7 @@ async def _render(script: VideoScript, user_id):
     folder.mkdir(exist_ok=True)
     output = folder / 'video.mp4'
     if output.is_file() and output.stat().st_size:
+        await operations.progress('cache_hit', message='Reused the rendered video from cache.')
         return key
     (folder / 'script.json').write_text(script.model_dump_json())
     command = [sys.executable, '-I', str(Path(__file__).with_name('renderer_worker.py')), str(folder.resolve())]

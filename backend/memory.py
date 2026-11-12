@@ -1,5 +1,6 @@
 """Compact state plus a bounded view of the append-only history."""
 from copy import deepcopy
+from . import workflow
 from .activity import record
 from sqlalchemy import select
 from .db import Session, StudentState, Event
@@ -17,11 +18,13 @@ def get_short_term_memory(db, session_id: int) -> dict:
     if row is None:
         raise ValueError('Session not found')
     record('memory_read', 'Retrieved current question, reasoning, and session context.')
+    workflow.memory_read(db, 'session memory', row.state, revision=row.state.get('revision', 0), response_revision=row.state.get('response_revision', 0))
     return deepcopy(row.state)
 
 
 def update_short_term_memory(db, session_id: int, updates: dict) -> dict:
     state = get_short_term_memory(db, session_id)
+    before = deepcopy(state)
     state.update(deepcopy(updates))
     if 'workspace' in updates and 'response' not in updates:
         from .response import response_for
@@ -31,6 +34,9 @@ def update_short_term_memory(db, session_id: int, updates: dict) -> dict:
     state['response'] = response_for(state)
     state = SessionData.model_validate(state).model_dump(mode='json')
     db.get(Session, session_id).state = state
+    workflow.memory_write(db, 'session memory', before, state)
+    if state.get('plan_version') != before.get('plan_version'):
+        workflow.version_artifact('plan', state.get('plan', {}), state.get('plan_version', 0), 'produced', db=db)
     record('memory_update', 'Updated session memory: ' + ', '.join(sorted(updates)) + '.')
     return deepcopy(state)
 
@@ -39,14 +45,18 @@ def get_long_term_memory(db, user_id: int) -> dict:
     row = db.get(StudentState, user_id)
     record('memory_read', 'Retrieved learning memory: mastery, misconceptions, and prior summaries.')
     if not row:
-        return StudentData().model_dump(mode='json')
+        data = StudentData().model_dump(mode='json')
+        workflow.memory_read(db, 'learning memory', data, memory_revision=0)
+        return data
     data = {**StudentData().model_dump(mode='json'), **deepcopy(row.data)}
+    workflow.memory_read(db, 'learning memory', data, memory_revision=data.get('memory_revision', 0))
     data['mastery'] = normalize_mastery(data.get('mastery', {}))
     return data
 
 
 def update_long_term_memory(db, user_id: int, updates: dict, evidence_id: int | None = None) -> dict:
     data = get_long_term_memory(db, user_id)
+    before = deepcopy(data)
     reconcile_items(db, user_id, data, legacy=True)
     data.update(deepcopy(updates))
     data['memories'] = data.get('memories', [])[-30:]
@@ -58,6 +68,7 @@ def update_long_term_memory(db, user_id: int, updates: dict, evidence_id: int | 
         row.data = data
     else:
         db.add(StudentState(user_id=user_id, data=data))
+    workflow.memory_write(db, 'learning memory', before, data)
     record('memory_update', 'Updated learning memory: ' + ', '.join(sorted(updates)) + '.')
     return deepcopy(data)
 
@@ -66,7 +77,9 @@ def get_relevant_history(db, session_id: int, limit: int = 20) -> list[dict]:
     rows = db.scalars(select(Event).where(Event.session_id == session_id, Event.type.in_(['student_message', 'problem_attempt', 'intervention', 'assessment', 'feedback', 'memory_correction']))
                       .order_by(Event.id.desc()).limit(min(limit, 100))).all()
     record('memory_read', 'Retrieved relevant session history.')
-    return [dict(id=e.id, type=e.type, data=deepcopy(e.data)) for e in reversed(rows)]
+    result = [dict(id=e.id, type=e.type, data=deepcopy(e.data)) for e in reversed(rows)]
+    workflow.memory_read(db, 'session history', result)
+    return result
 
 
 def reconcile_items(db, user_id, data, evidence_id=None, legacy=False):

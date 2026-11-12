@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse, Response
 from pydantic import Field, field_validator
-from . import utils, memory, context, knowledge, research, websearch, operations, video
+from . import workflow, utils, memory, context, knowledge, research, websearch, operations, video
 from .db import Session, Operation, append_event
 from .response import content_key, response_for
 
@@ -120,13 +120,13 @@ def operation(request: Request, oid: str):
 
 @router.get('/api/material-jobs/{oid}/events')
 @router.get('/api/operations/{oid}/events')
-async def operation_events(request: Request,oid: str,after: int=0):
+async def operation_events(request: Request,oid: str,after: int=0,workflow_after: int | None=None):
     from .main import SessionLocal
     if operations.snapshot(SessionLocal,oid,request.state.user_id) is None:
         raise HTTPException(404,'Operation not found.')
     try: after=max(after,int(request.headers.get('last-event-id','0')))
     except ValueError: raise HTTPException(400,'Invalid event cursor.')
-    return StreamingResponse(operations.events(SessionLocal,oid,request.state.user_id,after),
+    return StreamingResponse(operations.events(SessionLocal,oid,request.state.user_id,after,workflow_after),
         media_type='text/event-stream',headers={'X-Accel-Buffering':'no','Cache-Control':'no-cache'})
 
 
@@ -179,7 +179,7 @@ async def queue_video(job,result,learning_context):
     from .main import SessionLocal,broadcast,memory_changed
     sid=job['session_id']
     spec=video.VideoScript.model_validate(result['metadata'].pop('video_script'))
-    ids={p['id'] for p in learning_context.get('knowledge',[])}
+    ids={p['id'] for p in learning_context.get('knowledge',[])} | {p['id'] for p in learning_context.get('graph_sources',[])}
     if any(ref not in ids for ref in spec.source_ids): raise ValueError('Video must cite supplied sources.')
     with SessionLocal.begin() as db:
         row=db.get(Session,sid); uid=row.user_id
@@ -192,7 +192,7 @@ async def queue_video(job,result,learning_context):
             state['plan']=learning_context['plan']; state['plan_version']=state.get('plan_version',0)+1
         expected_plan=state.get('plan_version',0)
         memory.update_short_term_memory(db,sid,state)
-    oid=operations.create(SessionLocal,uid,'video',dict(session_id=sid,title=spec.title,content=spec.content,
+    oid=operations.create(SessionLocal,uid,'video',dict(session_id=sid,title=spec.title,content=spec.content,retry_of=job.get('retry_operation_id'),
         retry_data=dict(job=job,spec=spec.model_dump(),context=learning_context)))
     with SessionLocal.begin() as db:
         memory.update_short_term_memory(db,sid,{'pending_video':oid,'last_video_operation':oid})
@@ -221,7 +221,7 @@ async def queue_video(job,result,learning_context):
             if state.get('ended') or changed or stale or state.get('pending_video')!=oid:
                 await operations.progress('discarded',message='The question or response changed; this animation was not delivered.')
                 return dict(discarded=True)
-            final=dict(type='visualization',content=spec.content,metadata=dict(concept=spec.concept,video=payload,
+            final=dict(type='visualization',content=spec.content,metadata=dict(concept=spec.concept,video=payload,source_ids=spec.source_ids,
                 retrieved_sources=[dict(id=p['id'],source=p['source'],url=p.get('url')) for p in learning_context['knowledge']]))
             event=append_event(db,sid,'intervention',dict(**final,trigger_event_id=job['event_id'],proactive=not job['explicit']))
             o=state['observer']; o.pop('pending_wake',None)
@@ -232,7 +232,9 @@ async def queue_video(job,result,learning_context):
                 o['pending_intervention']=dict(action='WAKE',event_id=event.id,features=o.get('wake_features',{}),tool='visualization',at=utils.now())
             memory.update_short_term_memory(db,sid,{**state,'pending_video':None})
             delivered=dict(type='intervention',event_id=event.id,proactive=not job['explicit'],result=final,revision=state['revision'])
+        delivered['workflow_run_id'] = workflow.CURRENT.get().run_id if workflow.CURRENT.get() else None
         await broadcast(sid,delivered)
+        workflow.record('delivery.video', event_id=event.id)
         await memory_changed(sid)
         return payload
     async def guarded():
@@ -255,7 +257,7 @@ async def retry_video(request: Request,oid: str):
     if data['status'] not in ('failed','interrupted'): raise HTTPException(409,'Animation is already running or complete.')
     with SessionLocal() as db:
         saved=db.get(Operation,oid).data['retry_data']
-    job=saved['job'];sid=job['session_id']
+    job={**saved['job'],'retry_operation_id':oid};sid=job['session_id']
     with SessionLocal() as db:
         row=db.get(Session,sid)
         if row.user_id!=request.state.user_id or row.state.get('ended') or row.state.get('current_problem',{}).get('id')!=job['problem'].get('id'):

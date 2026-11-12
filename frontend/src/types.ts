@@ -43,8 +43,8 @@ export type Result = {
 };
 export type Assessment = { correct: boolean; reason: string; verified: boolean; method?: string };
 export type HistoryItem =
-  | { id: number; type: 'student_message'; data: { content: string } }
-  | { id: number; type: 'intervention'; data: Result & { proactive?: boolean } };
+  | { id: number; workflow_run_id?: string | null; type: 'student_message'; data: { content: string } }
+  | { id: number; workflow_run_id?: string | null; type: 'intervention'; data: Result & { proactive?: boolean } };
 
 
 export type LearningPlan = { objective: string; steps: string[]; learning_goals: string[] };

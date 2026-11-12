@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 from sqlalchemy import select
 from pydantic import Field
-from . import db as database
+from . import workflow, db as database
 from . import prompts, config, utils
 from .db import Concept, ConceptEdge, Material
 
@@ -147,7 +147,9 @@ def retrieve_knowledge(query: str, limit: int=4, material_id: str | None=None, u
             score += math.log(1 + (len(chunks) - df[term] + 0.5) / (df[term] + 0.5)) * tf * 2.5 / (tf + 1.5 * (0.25 + 0.75 * sum(count.values()) / avg))
         if score > 0:
             scored.append({**chunk, 'score': round(score, 4)})
-    return sorted(scored, key=lambda c: c['score'], reverse=True)[:limit]
+    result = sorted(scored, key=lambda c: c['score'], reverse=True)[:limit]
+    workflow.retrieved(result)
+    return result
 
 EXTRACTION_BUDGET = 24000
 
@@ -159,6 +161,7 @@ def extraction_input(documents: list[tuple[str, str]]) -> str:
     sections = (f'### Document {i}: {name}\n{text[:share]}' for i, (name, text) in enumerate(documents, 1))
     return '\n\n'.join(sections)
 
+@workflow.stage('Knowledge · Build and validate graph', 'agents')
 async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=None, context: dict | None=None, primary_count: int | None=None) -> ConceptGraph:
     instructions = prompts.EXTRACT_CONCEPTS_MULTI + (
         ' Build the graph around the requested subject. Fill missing prerequisites without broadening the subject. '
@@ -174,19 +177,94 @@ async def extract_concepts(documents: list[tuple[str, str]], focus: str | None=N
     if gemini:
         instructions += (' Transport: return graph_json containing the complete graph as a JSON string, '
             'without Markdown fences. Its decoded object must follow this schema: '+json.dumps(ConceptGraph.model_json_schema()))
-    result = await utils.call_llm(instructions, bound(dict(subject=focus or '', documents=docs,
-        learning_context=context or {})), schema=GeminiGraph if gemini else ConceptGraph,
-        operation='EXTRACT_CONCEPTS',max_output_tokens=max(config.MAX_OUTPUT_TOKENS,6000))
-    graph=ConceptGraph.model_validate_json(result.graph_json) if gemini else result
-    lookup = {d['id']:d['text'] for d in docs}
-    for e in graph.evidence:
-        if e.source_id not in lookup or e.quote not in lookup[e.source_id] or e.concept not in graph.concepts:
-            raise ValueError('Graph evidence must reference an exact supplied source passage.')
-    covered = {(e.prerequisite,e.concept) for e in graph.evidence}
-    if any(('', name) not in covered for name in graph.concepts) or any(
-        (e.prerequisite,e.concept) not in covered for e in graph.prerequisites):
-        raise ValueError('The model omitted evidence for a graph concept or prerequisite. Please retry.')
-    return graph
+    payload=bound(dict(subject=focus or '',documents=docs,learning_context=context or {}))
+    lookup={d['id']:d['text'] for d in docs}
+    for attempt in range(2):
+        result=await utils.call_llm(instructions,payload,schema=GeminiGraph if gemini else ConceptGraph,
+            operation='EXTRACT_CONCEPTS' if attempt==0 else 'REPAIR_GRAPH_EVIDENCE',
+            max_output_tokens=max(config.MAX_OUTPUT_TOKENS,6000))
+        try:
+            # A JSON-string transport can contain literal line breaks copied from a source.
+            # Parse those as text, then enforce the complete schema and evidence checks locally.
+            graph=ConceptGraph.model_validate(json.loads(result.graph_json,strict=False)) if gemini else result
+        except (ValueError,TypeError):
+            if attempt:
+                raise ValueError('The model returned an invalid graph. Please retry.') from None
+            payload=bound({**payload,'previous_graph_json':getattr(result,'graph_json','')[:16000],
+                'repair_errors':['Return valid graph JSON. Escape quotations and preserve source text.']})
+            continue
+        errors=[];valid=[]
+        for e in graph.evidence:
+            if e.source_id not in lookup or e.concept not in graph.concepts:
+                errors.append(f'{e.concept}: use a supplied source ID and an existing graph concept.')
+                continue
+            resolved=resolve_quote(lookup[e.source_id],e.quote)
+            if resolved is None:
+                errors.append(f'{e.concept} ({e.source_id}): quote must be a contiguous exact passage copied from that source, not a paraphrase.')
+            else:
+                e.quote=resolved
+                valid.append(e)
+        covered={(e.prerequisite,e.concept) for e in valid}
+        # Valid edge evidence also grounds its target concept; a duplicate node citation is unnecessary.
+        covered_concepts={e.concept for e in valid}
+        missing=[name for name in graph.concepts if name not in covered_concepts]
+        missing_edges=[e for e in graph.prerequisites if (e.prerequisite,e.concept) not in covered]
+        if not missing and not missing_edges:
+            if errors:
+                from .operations import progress
+                await progress('checking_evidence',message=f'Discarded {len(errors)} unsupported extra citations; every graph item retains valid source evidence.')
+            graph.evidence=valid
+            return graph
+        errors.append('Supply valid evidence for every concept and prerequisite; remove unsupported items.')
+        if not attempt:
+            from .operations import progress
+            await progress('checking_evidence',message='Checking graph citations and repairing unsupported quotations.')
+            payload=bound({**payload,'previous_graph':graph.model_dump(),'repair_errors':errors})
+    raise ValueError('The model could not substantiate graph concepts with source quotations. Please retry.')
+
+
+def resolve_quote(source,quote):
+    """Resolve harmless typography/whitespace changes back to actual source text."""
+    if quote in source: return quote
+    import unicodedata
+    def normalized(text):
+        letters=[];positions=[]
+        punctuation={'–':'-','—':'-','−':'-','‘':"'",'’':"'",'“':'"','”':'"'}
+        for i,char in enumerate(text):
+            for c in unicodedata.normalize('NFKC',char).casefold():
+                c=punctuation.get(c,c)
+                if c.isspace():
+                    if letters and letters[-1]==' ': continue
+                    c=' '
+                letters.append(c);positions.append(i)
+        return ''.join(letters),positions
+    needle,_=normalized(quote)
+    haystack,positions=normalized(source)
+    start=haystack.find(needle)
+    if not needle: return None
+    if start>=0:
+        resolved=source[positions[start]:positions[start+len(needle)-1]+1]
+        return resolved if len(resolved)<=500 else None
+    # Models sometimes omit a sentence between two copied passages. Locate both anchors
+    # and return the entire contiguous ORIGINAL span, including the omitted sentence.
+    # Every quoted word must occur in order; paraphrases and invented words still fail.
+    clean=needle.replace('...',' ').replace('…',' ').strip()
+    words=re.findall(r'\w+|[^\w\s]',clean)
+    if len(clean)<40 or len(words)<8: return None
+    anchor=clean[:24]; tail=clean[-24:]
+    candidate_start=haystack.find(anchor)
+    for _ in range(10):
+        if candidate_start<0: break
+        candidate_end=haystack.find(tail,candidate_start+len(anchor),candidate_start+550)
+        if candidate_end>=0:
+            end=candidate_end+len(tail)
+            span=source[positions[candidate_start]:positions[end-1]+1]
+            candidates=iter(re.findall(r'\w+|[^\w\s]',haystack[candidate_start:end]))
+            if len(span)<=500 and all(any(part==token for token in candidates) for part in words):
+                return span
+        candidate_start=haystack.find(anchor,candidate_start+1)
+    return None
+
 
 def store_graph(db, graph: ConceptGraph, isolated: bool = False):
     names = list(dict.fromkeys((n.strip()[:200] for n in graph.concepts if n.strip())))

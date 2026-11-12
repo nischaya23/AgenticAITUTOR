@@ -242,3 +242,33 @@ def test_visualization_job_delivers_seekable_video_and_captions(app_env):
     client.post('/api/auth/signup',json={'email':'video-other@local.test','password':'test-password'})
     assert client.get(url).status_code==404
     assert client.get(url+'/captions').status_code==404
+
+
+async def test_observer_coalesces_drafts_after_quiet_period_and_limits_review_rate(app_env,monkeypatch):
+    from test_response_hypotheses import Clock
+    client,factory,_=app_env
+    sid,_,_=prepare(client)
+    clock=Clock();monkeypatch.setattr(utils,'now',lambda:clock.time)
+    from backend import observer as numerical_observer
+    monkeypatch.setattr(numerical_observer,'now',lambda:clock.time)
+    monkeypatch.setattr(config,'OBSERVER_LLM_ENABLED',True)
+    model=AsyncMock(return_value=Decision(action='WAIT',reason='The student is progressing.',evidence_references=[]))
+    monkeypatch.setattr(utils,'call_llm',model)
+    scheduler=ReviewScheduler(factory,AsyncMock(),lambda *_:None,AsyncMock());scheduler.sleep=clock.sleep
+    def edit(text):
+        with factory.begin() as db:
+            return orchestrator.ingest(db,sid,utils.ClientEvent(type='student_action',action='edit',content=text))
+    scheduler.schedule(sid,edit('First draft'))
+    await clock.advance(4)
+    scheduler.schedule(sid,edit('Latest draft'))
+    await clock.advance(4)
+    assert model.await_count==0
+    await clock.advance(4)
+    assert model.await_count==1
+    assert model.call_args.args[1]['context']['response']['text']=='Latest draft'
+    scheduler.schedule(sid,edit('New reasoning'))
+    await clock.advance(8)
+    assert model.await_count==1
+    await clock.advance(22)
+    assert model.await_count==2
+    assert model.call_args.args[1]['context']['response']['text']=='New reasoning'

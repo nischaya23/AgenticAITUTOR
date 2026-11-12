@@ -2,7 +2,7 @@
 from typing import Literal
 from pydantic import Field, StringConstraints
 from typing import Annotated
-from . import prompts, utils
+from . import workflow, prompts, utils
 
 class Plan(utils.Schema):
     objective: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
@@ -13,13 +13,16 @@ class Selection(utils.Schema):
     action: Literal['none', 'hint', 'explanation', 'highlight', 'visualization', 'guiding_question']
     strategy: str
 
+@workflow.stage('Planner · Create plan', 'agents')
 async def create_learning_plan(context: dict) -> dict:
     return (await utils.call_llm(prompts.CREATE_LEARNING_PLAN, context, schema=Plan, operation='CREATE_LEARNING_PLAN')).model_dump()
 
+@workflow.stage('Planner · Select teaching tool', 'agents')
 async def select_intervention(context: dict, explicit: bool, requested: str | None=None) -> dict:
     if requested:
         return Selection(action=requested, strategy=prompts.REQUESTED_TOOL).model_dump()
     return (await utils.call_llm(prompts.SELECT_INTERVENTION, {'explicit': explicit, **context}, schema=Selection, operation='SELECT_INTERVENTION')).model_dump()
 
+@workflow.stage('Planner · Revise plan', 'agents')
 async def revise_plan(context: dict) -> dict:
     return await create_learning_plan({**context, 'replan': prompts.REPLAN})

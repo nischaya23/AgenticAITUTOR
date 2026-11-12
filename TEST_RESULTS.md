@@ -1,79 +1,46 @@
-# Executed validation — 5 November 2026
+# Executed validation — 12 November 2026
 
-## Python
+## Backend regressions
 
-Command: `python -m pytest -q`
+```bash
+.venv/bin/pytest -q --tb=short
+```
 
-**25 passed, 2 skipped, 2 dependency deprecation warnings; 1.51 seconds.**
+Latest full run: **142 passed, 4 skipped, 1 dependency deprecation warning**. The skipped checks require explicitly enabled paid-provider or browser integration flags.
 
-The two skipped tests are explicitly opt-in: a paid OpenAI call and a Chromium
-browser check. The warnings originate in installed AnyIO and Starlette test
-dependencies; the application tests passed.
+The older Gemini SDK tests now assert the text-only question schema and rejection of removed diagram fields. Their existing logging and provider-failure checks remain intact; the suite requires no legacy-test exclusions.
 
-Coverage includes:
+Backend tests run outside the execution sandbox because Starlette/AnyIO's cross-thread TestClient event loop hangs within this environment's sandbox. No Docker is used.
 
-- Exactly six database tables, foreign keys, append-only triggers, JSON
-  persistence, and reopening the database through a fresh engine.
-- All five validated intervention tools, structured highlights/graphs,
-  strict function definitions, and invalid tool metadata rejection.
-- Explicit WebSocket tutoring with proactive help disabled, saved plans/goals,
-  and reloaded history.
-- WAIT without invoking agents or LLMs; WAKE through the Orchestrator.
-- Rule fallback, typing deferral, cooldowns, preferences, expired windows,
-  learned WAIT selection, and persisted LinUCB updates.
-- Stale and duplicate intervention suppression.
-- Exact assessments, heuristic mastery, no repeated-correct-answer inflation,
-  evidence-linked reflection, one-time feedback, and negative-outcome replanning.
-- No bandit credit for provisional judgments or pre-intervention attempts.
-- Material ingestion, BM25 retrieval, graph storage and cycle prevention.
-- Input validation, private-answer filtering, no execution of student code,
-  problem generation, and session summary persistence.
-- The production OpenAI helper with mocked SDK-shaped parse/function outputs,
-  model configuration, `store=False`, and token/call metrics. No paid calls.
+## Frontend
 
-## Frontend DOM tests
+```bash
+npm test
+```
 
-Command: `npm test`
+The TypeScript/Vite build succeeded and **19 DOM tests passed**. Coverage includes topic preparation, ambiguity choices, selected-source explanations, failed-upload recovery, memory corrections, text-only submissions, legacy text draft restoration, video controls, annotations, saved sessions, themes and mobile navigation.
 
-**4 passed, 0 failed; 1.49 seconds.**
+Vite reports its existing dependency directive and large-bundle warnings. DOM checks do not establish pixel-perfect browser layout.
 
-Checks cover all five intervention renderers, SVG graph/trace output, Unicode
-highlight offsets, flushing edits before explicit requests, problem IDs on
-attempts, reasoning-assessment messages, safe text rendering, and suppression
-of proactive cards when unsent local edits exist. Transport is mocked using
-JSDOM; this does not establish browser layout correctness.
+## Local video integration
 
-JavaScript syntax and Python compilation checks also passed.
+A local drawing script was interpreted through the bounded drawing runtime and encoded with Pillow/FFmpeg, without executing generated Python or using Docker. FFprobe confirmed H.264, 960×540, 15 fps, `yuv420p`, and the requested duration. A two-second sample encoded in approximately 0.3 seconds on this machine; that excludes model generation and is not an end-to-end latency guarantee.
 
-## Browser and live API limits
+Tests also verify seekable authenticated playback, WebVTT captions, account isolation, cache reuse, unsupported script rejection and bounded drawing work.
 
-The optional Chromium check was attempted. The environment prevented Chromium
-from creating its required socket (`Operation not permitted`). Browser download
-was also unavailable, and a separate browser could not reach the isolated local
-server. Therefore no full-browser pass or visual layout verification is claimed.
-`tests/test_browser.py` remains available to run in a normal local environment.
+## Web-search regression and live verification
 
-No user OpenAI key was supplied. The paid live integration test was not run.
-`tests/test_openai_integration.py` provides an opt-in structured Responses smoke
-test. Mocked integration verifies the application's SDK request/response wiring,
-not external API availability or live model teaching quality.
+`tests/test_websearch_regressions.py` covers:
 
-## Observer microbenchmark
+- Gemini thought-signature metadata preserved across native function-call turns.
+- Selected source text retained when a follow-up model request fails or returns malformed arguments.
+- Upload preparation continuing to a sourced graph after partial research failure.
+- Actual Wikipedia/DuckDuckGo/page-fetch plumbing through deterministic HTTP transports.
+- A shallow Gemini graph transport followed by complete local schema and citation validation.
+- Literal newlines, typographic whitespace, source-backed quote repair and invalid-source rejection.
+- Redundant invalid citations discarded only when every graph item still has valid evidence.
+- Shortened quotations resolved to complete original source passages, never stored as stitched or invented text.
 
-10,000 independent synthetic observations exercised the three branches with a
-fixed timestamp, using the production feature extraction and cold-start policy.
-This excludes database/network work and is not a student behavior simulation.
+A small **live check against the configured Gemini provider and web search** completed successfully for TF-IDF. It selected the GeeksforGeeks and LearnDataSci TF-IDF pages, then generated three concepts—Term Frequency, Inverse Document Frequency and TF-IDF—with four locally validated citations.
 
-| Measure | Result |
-|---|---:|
-| Mean Observer processing time | 0.0320 ms |
-| p95 Observer processing time | 0.0660 ms |
-| WAIT observations | 3,334 |
-| DEFER observations | 3,333 |
-| WAKE observations | 3,333 |
-| LLM calls | 0 |
-
-The synthetic distribution is chosen by the benchmark, not a measured production
-intervention rate. For live runs, `/api/metrics` reports action counts, intervention
-counts, LLM helper calls, token usage, API latency, and Observer mean latency.
-No live API latency, actual token cost, or learning-effectiveness result is claimed.
+The live check initially reproduced the reported failure and exposed both provider protocol/schema issues and overly strict handling of otherwise supported graph evidence. Provider errors are no longer silently allowed to erase previously selected pages. Ordinary regression tests remain fully mocked and do not make paid calls.

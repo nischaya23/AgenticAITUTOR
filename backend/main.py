@@ -14,7 +14,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import Field, ValidationError
 from sqlalchemy import delete, select
 from . import logging_setup as logs
-from . import auth, websearch, hypothesis, plans, config, knowledge, memory, orchestrator, tools, utils, context, research, operations
+from . import workflow, auth, websearch, hypothesis, plans, config, knowledge, memory, orchestrator, tools, utils, context, research, operations
 from .response import Response, response_for
 from .db import Session, Event, Concept, Login, Material, Operation, SessionLocal, init_db, append_event
 
@@ -35,6 +35,9 @@ async def lifespan(app):
         for operation in db.scalars(select(Operation).where(Operation.status == 'running')):
             operation.status = 'interrupted'
             operation.data = {**operation.data, 'error': 'Interrupted by restart. Please retry.'}
+    workflow.HEALTHY = True
+    workflow.interrupt_remaining()
+    dispatcher = asyncio.create_task(workflow.dispatch(broadcast))
     DRAFTS = hypothesis.DraftScheduler(SessionLocal, broadcast, track_task)
     from .observer_review import ReviewScheduler
     REVIEWS = ReviewScheduler(SessionLocal, broadcast, track_task, run_job)
@@ -65,6 +68,8 @@ async def lifespan(app):
     for task in pending:
         task.cancel()
     await asyncio.gather(*pending, return_exceptions=True)
+    dispatcher.cancel()
+    await asyncio.gather(dispatcher, return_exceptions=True)
     SOCKETS.clear()
     TASKS.clear()
     LOCKS.clear()
@@ -180,7 +185,18 @@ async def request_logging(request, call_next):
         started = time.perf_counter()
         logs.event('http.start', method=request.method, path=request.url.path)
         try:
-            response = await call_next(request)
+            if sid is not None and request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+                with workflow.run('Study setup' if parts[-1] in ('study', 'problem', 'next', 'concept', 'skip') else parts[-1].replace('_', ' ').capitalize(), session_id=sid):
+                    response = await call_next(request)
+                    if response.status_code >= 400:
+                        workflow.outcome('failed', 'Request did not complete')
+            elif request.url.path in ('/api/materials', '/api/materials/web') and request.method == 'POST':
+                with workflow.run('Topic/upload preparation', user_id=request.state.user_id):
+                    response = await call_next(request)
+                    if response.status_code >= 400:
+                        workflow.outcome('failed', 'Preparation did not complete')
+            else:
+                response = await call_next(request)
             if request.url.path.startswith('/api/'):
                 response.headers['Cache-Control'] = 'no-store'
             logs.event('http.complete', status=response.status_code, duration_ms=round((time.perf_counter()-started)*1000,2))
@@ -264,8 +280,9 @@ def read_session(session_id: int):
         history = db.scalars(select(Event).where(Event.session_id == session_id,
             Event.type.in_(['student_message', 'intervention', 'assessment', 'reflection']))
             .order_by(Event.id.desc())).all()
+        links = workflow.message_links(db, session_id) or {}
         return {'id': row.id, 'state': public_state(row.state),
-                'history': [{'id': e.id, 'type': e.type, 'data': e.data} for e in reversed(history)]}
+                'history': [{'id': e.id, 'type': e.type, 'data': e.data, 'workflow_run_id': links.get(e.id)} for e in reversed(history)]}
 
 
 @app.get('/api/student')
@@ -296,6 +313,7 @@ async def _new_problem(session_id: int, request: ProblemRequest):
         question_context = context.for_session(db, session_id)
     try:
         sources = knowledge.retrieve_knowledge(request.concept, user_id=user_id)
+        question_context.update(concept=request.concept,knowledge=sources)
         problem = await tools.generate_problem(request.concept, learning_context=question_context, sources=sources, plan=initial.get('plan', {}), plan_version=initial.get('plan_version', 0),
             hypotheses=hypothesis.eligible(initial), hypothesis_version=initial.get('hypothesis_state', {}).get('version', 0),
             recent_formats=initial.get('recent_formats', []), previous_prompts=initial.get('recent_questions', []))
@@ -384,6 +402,7 @@ async def build_material(user_id: int, documents: list[tuple], extra: dict | Non
     record = await asyncio.to_thread(knowledge.save_materials, documents, graph.model_dump(), extra)
     with SessionLocal.begin() as db:
         db.add(Material(id=record['id'], user_id=user_id))
+    workflow.attach_material(record['id'])
     return {'id':record['id'], 'name':record['name'], 'sources':record['sources'],
         'web_enhance':record['web_enhance'], 'web_sources':record.get('web_sources', []), 'concepts':graph.model_dump()}
 
@@ -530,7 +549,10 @@ async def advance_study(session_id: int, chosen: str | None = None) -> dict | No
                 return None
             memory.update_short_term_memory(db, session_id, {'study_complete': True})
             return study_snapshot(db, session_id)
+    question_context['concept']=concept
     sources = await study_sources(material, concept, question_context)
+    question_context.update(knowledge=sources,previous_problem=question_context.pop('problem',{}),previous_response=question_context.pop('response',{}))
+    question_context.pop('workspace',None)
     problem = await tools.generate_problem(concept, learning_context=question_context, sources=sources, previous_prompts=recent, plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
         hypotheses=hypothesis.eligible(state), hypothesis_version=state.get('hypothesis_state', {}).get('version', 0),
         eligible_concepts=eligible, recent_formats=state.get('recent_formats', []))
@@ -735,6 +757,8 @@ def metrics():
 
 async def broadcast(session_id: int, data: dict):
     for socket in list(SOCKETS[session_id]):
+        if data.get('type') in ('workflow_events', 'workflow_tracking') and socket.query_params.get('workflow') != '1':
+            continue
         try:
             with SessionLocal() as db:
                 valid = auth.user_for_token(db, socket.cookies.get(auth.COOKIE)) is not None
@@ -755,6 +779,8 @@ def track_task(sid, task):
 async def _run_job(job: dict):
     sid = job['session_id']
     async with LOCKS.setdefault(sid, asyncio.Lock()):
+        workflow.start_run(workflow.CURRENT.get())
+        workflow.record('execution.started', message='Teaching/grading slot acquired', queue_ms=round((utils.now()-job.get('received_at', utils.now()))*1000, 2))
         await broadcast(sid, {'type': 'busy', 'active': True})
         try:
             async def research_progress(kind, **data):
@@ -765,7 +791,9 @@ async def _run_job(job: dict):
             finally:
                 operations.EMITTER.reset(token)
             for output in outputs:
+                output['workflow_run_id'] = workflow.CURRENT.get().run_id if workflow.CURRENT.get() else None
                 await broadcast(sid, output)
+                workflow.record('delivery.'+output['type'], message='Output delivered', event_id=output.get('event_id'))
             assessment_output = next((o for o in outputs if o['type'] == 'assessment'), None)
             if assessment_output:
                 progress = None
@@ -794,6 +822,7 @@ async def _run_job(job: dict):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            workflow.outcome('failed', 'Tutor request failed')
             utils.METRICS['job_errors'] += 1
             # API exception strings may contain request details; return a useful fixed message.
             if isinstance(exc, APIStatusError):
@@ -836,7 +865,7 @@ async def _run_job(job: dict):
 
 
 async def run_job(job):
-    with logs.scope(job['session_id'], session_log_uuid(job['session_id']), trigger_event_id=job['event_id']):
+    with workflow.run(job['kind'].replace('_', ' ').capitalize(), session_id=job['session_id'], trace=workflow.load_trace(job.get('workflow_run_id')), independent=True, queued=True, trigger={'parent_run_id': job.get('parent_run_id'), 'event_id': job['event_id']}), logs.scope(job['session_id'], session_log_uuid(job['session_id']), trigger_event_id=job['event_id']):
         started = time.perf_counter()
         logs.event('job.start', kind=job['kind'])
         await _run_job(job)
@@ -863,6 +892,8 @@ async def websocket(socket: WebSocket, session_id: int):
             return
     await socket.accept()
     SOCKETS[session_id].add(socket)
+    if not workflow.HEALTHY and socket.query_params.get('workflow') == '1':
+        await socket.send_json({'type': 'workflow_tracking', 'tracking': 'incomplete'})
     with SessionLocal() as db:
         await socket.send_json({'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
     try:
@@ -890,6 +921,7 @@ async def websocket(socket: WebSocket, session_id: int):
                     logs.event('observer.decision', decision=job['decision'], event_id=job['event_id'])
                 ack = {'type': 'ack', 'event_id': job['event_id'], 'event_type': job['kind'], 'action': event.action, 'decision': job['decision'], 'revision': job['revision']}
                 ack['response_revision'] = job['response_revision']
+                ack['workflow_run_id'] = job.get('workflow_run_id')
                 if event.type == 'student_message':
                     ack['content'] = event.content
                 await socket.send_json(ack)
@@ -920,6 +952,9 @@ async def memory_changed(session_id):
         ids = list(db.scalars(select(Session.id).where(Session.user_id == row.user_id)))
     for sid in ids:
         await broadcast(sid, {'type':'memory_changed'})
+
+from .workflow_api import router as workflow_router
+app.include_router(workflow_router)
 
 from .features import router as feature_router
 app.include_router(feature_router)

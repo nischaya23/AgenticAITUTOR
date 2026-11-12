@@ -4,6 +4,7 @@ import json
 from contextvars import ContextVar
 from uuid import uuid4
 from sqlalchemy import select
+from . import workflow
 from .db import Operation, OperationEvent, utcnow
 
 EMITTER = ContextVar('operation_emitter', default=None)
@@ -25,6 +26,7 @@ def emit(factory, operation_id, kind, **data):
 
 
 async def progress(kind, **data):
+    workflow.progress(kind, data)
     callback = EMITTER.get()
     if callback:
         await callback(kind, **data)
@@ -50,7 +52,7 @@ def snapshot(factory, operation_id, user_id):
 
 
 def spawn(factory, operation_id, work):
-    async def run():
+    async def execute():
         async def callback(kind, **data):
             emit(factory, operation_id, kind, **data)
         token = EMITTER.set(callback)
@@ -58,9 +60,11 @@ def spawn(factory, operation_id, work):
             result = await work()
             finish(factory, operation_id, 'needs_clarification' if isinstance(result,dict) and result.get('type')=='choices' else 'ready', result=result)
         except asyncio.CancelledError:
+            workflow.outcome('cancelled', 'Operation cancelled')
             finish(factory, operation_id, 'interrupted', error='Operation interrupted. Retry when ready.')
             raise
         except Exception as exc:
+            workflow.outcome('failed', 'Operation failed')
             from .logging_setup import event
             event('operation.failed', operation_id=operation_id, error=type(exc).__name__)
             from openai import APIStatusError
@@ -72,13 +76,29 @@ def spawn(factory, operation_id, work):
             finish(factory, operation_id, 'failed', error=message[:300])
         finally:
             EMITTER.reset(token)
+    parent = workflow.CURRENT.get()
+    with factory() as db:
+        operation = db.get(Operation, operation_id)
+    trace = workflow.create_run(operation.user_id, 'Visualization' if operation.kind == 'video' else 'Topic/upload preparation',
+        session_id=operation.data.get('session_id'), operation_id=operation_id,
+        trigger={'parent_run_id': parent.run_id if parent else None, 'retry_of': operation.data.get('retry_of')})
+    async def run():
+        with workflow.run(operation.kind, trace=trace, independent=True):
+            await execute()
     task = asyncio.create_task(run())
     TASKS.add(task)
-    task.add_done_callback(TASKS.discard)
+    def finished(done):
+        TASKS.discard(done)
+        if trace:
+            workflow.finish('cancelled' if done.cancelled() else 'interrupted', trace=trace)
+    task.add_done_callback(finished)
     return task
 
 
-async def events(factory, operation_id, user_id, after=0):
+async def events(factory, operation_id, user_id, after=0, workflow_after=None):
+    if workflow_after is None:
+        with factory() as db:
+            workflow_after = workflow.watermark(db) if after else 0
     while True:
         data = snapshot(factory, operation_id, user_id)
         if data is None:
@@ -87,7 +107,12 @@ async def events(factory, operation_id, user_id, after=0):
             if item['id'] > after:
                 after = item['id']
                 yield f"id: {after}\ndata: {json.dumps(item)}\n\n"
-        if data['status'] != 'running':
+        with factory() as db:
+            replay = workflow.replay(db, user_id, operation_id=operation_id, after=workflow_after, limit=500)
+        if replay['events']:
+            workflow_after = replay['cursor']
+            yield 'data: ' + json.dumps(dict(kind='workflow_events', **replay)) + '\n\n'
+        if data['status'] != 'running' and not replay['has_more']:
             return
         yield ': keep-alive\n\n'
         await asyncio.sleep(1)

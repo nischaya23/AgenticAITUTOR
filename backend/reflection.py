@@ -1,5 +1,5 @@
 """Outcome summaries, evidence-linked rewards, and optional session synthesis."""
-from . import prompts, utils
+from . import workflow, prompts, utils
 from .activity import record
 from .db import append_event
 from .memory import get_long_term_memory, update_long_term_memory
@@ -44,6 +44,7 @@ class SessionReflection(utils.Schema):
     summary: str
     next_goal: str
 
+@workflow.stage('Reflection · Review assessment', 'agents')
 async def reflect_on_answer(context: dict, assessment: dict) -> dict:
     record('reflection', 'Reflecting on the answer and prior help; LLM-based conclusions remain tentative.')
     return (await utils.call_llm(prompts.REFLECT_ON_ANSWER, {'context': context, 'assessment': assessment}, schema=SessionReflection, operation='REFLECT_ON_ANSWER')).model_dump()

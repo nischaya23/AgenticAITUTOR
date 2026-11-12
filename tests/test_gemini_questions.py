@@ -9,30 +9,21 @@ from openai.types.chat.parsed_chat_completion import ParsedChatCompletionMessage
 from backend import config, logging_setup as logs, planner, tools, utils
 
 
-def diagram():
-    return dict(nodes=[dict(id='a', label='Input', position=dict(x=0, y=0)),
-                       dict(id='b', label='Output', position=dict(x=200, y=0))],
-                edges=[dict(id='ab', source='a', target='b')])
-
-
 def wire_question(format):
-    return tools.GeminiProblem(prompt='Explain or draw the transformation.', concept='Flow',
-        expected_answer='A valid transformation.', rubric='Check the direction and labels.',
-        format=format, diagnostic_focus='Explain directed flow.',
-        diagram_json=json.dumps(diagram()) if format == 'diagram_interpretation' else '',
-        starter_diagram_json=json.dumps(diagram()) if format == 'diagram_construction' else '')
+    return tools.Problem(prompt='Explain the transformation in text.', concept='Flow',
+        expected_answer='A valid transformation.', rubric='Check the direction and reasoning.',
+        format=format, diagnostic_focus='Explain directed flow.')
 
 
-@pytest.mark.parametrize('format', ['explanation', 'trace', 'diagram_interpretation', 'diagram_construction'])
-async def test_gemini_question_uses_shallow_schema_and_normalizes_diagrams(monkeypatch, format):
+@pytest.mark.parametrize('format', ['explanation', 'trace'])
+async def test_gemini_question_uses_shallow_text_only_schema(monkeypatch, format):
     wire = wire_question(format)
     async def transport(request):
         body = json.loads(request.content)
         schema = body['response_format']['json_schema']['schema']
         assert '$defs' not in schema
         assert all(prop['type'] == 'string' for prop in schema['properties'].values())
-        assert 'diagram_json' in schema['properties'] and 'diagram' not in schema['properties']
-        assert 'diagram_json' in body['messages'][0]['content']
+        assert not {'diagram','starter_diagram','diagram_json','starter_diagram_json'} & set(schema['properties'])
         return httpx.Response(200, json=dict(id='test', created=1, model='test-model', object='chat.completion',
             choices=[dict(index=0, finish_reason='stop', message=dict(role='assistant', content=wire.model_dump_json()))],
             usage=dict(prompt_tokens=10, completion_tokens=10, total_tokens=20)))
@@ -46,23 +37,14 @@ async def test_gemini_question_uses_shallow_schema_and_normalizes_diagrams(monke
             result = await tools.generate_problem('Flow', sources=[])
     assert result['format'] == format
     assert result['expected_answer'] == wire.expected_answer
-    assert result['diagram'] == (diagram() if format == 'diagram_interpretation' else None)
-    assert result['starter_diagram'] == (diagram() if format == 'diagram_construction' else None)
-    assert 'diagram_json' not in result and 'starter_diagram_json' not in result
+    assert not {'diagram','starter_diagram','diagram_json','starter_diagram_json'} & set(result)
 
 
-@pytest.mark.parametrize('invalid', ['json', 'endpoint', 'positions', 'node_limit', 'missing_interpretation'])
-def test_gemini_wire_diagrams_keep_full_local_validation(invalid):
-    wire = wire_question('diagram_interpretation')
-    value = diagram()
-    if invalid == 'json': wire.diagram_json = 'not JSON'
-    elif invalid == 'missing_interpretation': wire.diagram_json = ''
-    else:
-        if invalid == 'endpoint': value['edges'][0]['target'] = 'missing'
-        if invalid == 'positions': value['nodes'][0]['position']['x'] = float('inf')
-        if invalid == 'node_limit': value['nodes'] *= 16
-        wire.diagram_json = json.dumps(value)
-    with pytest.raises(ValueError): wire.to_problem()
+@pytest.mark.parametrize('field', ['diagram', 'starter_diagram', 'diagram_json', 'starter_diagram_json', 'format'])
+def test_question_contract_rejects_removed_diagram_fields_and_formats(field):
+    value=wire_question('explanation').model_dump()
+    value[field]='diagram_construction' if field=='format' else '{}'
+    with pytest.raises(ValueError): tools.Problem.model_validate(value)
 
 
 def test_runtime_parsed_models_log_without_serializer_warnings():

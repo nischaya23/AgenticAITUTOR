@@ -97,6 +97,61 @@ class OperationEvent(Base):
     data: Mapped[dict] = mapped_column(JSON)
 
 
+class WorkflowRun(Base):
+    __tablename__ = 'workflow_runs'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey('sessions.id'), nullable=True, index=True)
+    operation_id: Mapped[str | None] = mapped_column(ForeignKey('operations.id'), nullable=True, index=True)
+    material_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(30), default='queued')
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkflowSpan(Base):
+    __tablename__ = 'workflow_spans'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('workflow_runs.id'), index=True)
+    parent_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    name: Mapped[str] = mapped_column(String(160))
+    category: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30))
+    dependencies: Mapped[list] = mapped_column(JSON, default=list)
+    consumed: Mapped[list] = mapped_column(JSON, default=list)
+    produced: Mapped[list] = mapped_column(JSON, default=list)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkflowArtifact(Base):
+    __tablename__ = 'workflow_artifacts'
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(50))
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkflowEvent(Base):
+    __tablename__ = 'workflow_events'
+    cursor: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), unique=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('workflow_runs.id'), index=True)
+    span_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    session_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    operation_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    type: Mapped[str] = mapped_column(String(80))
+    category: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30))
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 engine = create_engine(config.DATABASE_URL, connect_args={'check_same_thread': False})
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
@@ -115,6 +170,10 @@ def init_db():
         columns = {column['name'] for column in inspect(connection).get_columns('users')}
         if 'password_hash' not in columns:
             connection.exec_driver_sql('ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)')
+        for table in ('workflow_events', 'workflow_artifacts'):
+            for operation in ('UPDATE', 'DELETE'):
+                connection.exec_driver_sql(f'''CREATE TRIGGER IF NOT EXISTS {table}_no_{operation.lower()}
+                    BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, '{table} are immutable'); END''')
         for operation in ('UPDATE', 'DELETE'):
             connection.exec_driver_sql(f'''CREATE TRIGGER IF NOT EXISTS events_no_{operation.lower()}
                 BEFORE {operation} ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END''')
@@ -126,4 +185,6 @@ def append_event(db, session_id: int, kind: str, data: dict) -> Event:
     entry = Event(session_id=session_id, type=kind, data=validated)
     db.add(entry)
     db.flush()
+    from . import workflow
+    workflow.link_event(db, entry)
     return entry

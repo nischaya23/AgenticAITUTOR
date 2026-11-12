@@ -7,7 +7,7 @@ import asyncio
 from copy import deepcopy
 from typing import Literal
 from pydantic import Field
-from . import config, prompts, utils
+from . import workflow, config, prompts, utils
 from .db import Session
 from .response import content_key, has_content, response_for
 from .logging_setup import event as log_event
@@ -52,6 +52,7 @@ def eligible(state):
     return state.get('assessed_hypotheses', [])
 
 
+@workflow.stage('Hypothesis · Analyze response', 'agents')
 async def analyze(context, prior, origin, reference, assessment=None, reflection=None):
     references = {reference}
     references.update(f"event:{item['id']}" for item in context.get('history', []))
@@ -95,10 +96,16 @@ class DraftScheduler:
     def schedule(self, sid):
         if sid in self.tasks and not self.tasks[sid].done():
             return
-        task = asyncio.create_task(self._worker(sid))
+        with self.factory() as db:
+            row = db.get(Session, sid)
+            trace = workflow.create_run(row.user_id, 'Background review · Hypothesis', session_id=sid,
+                trigger={'snapshot': identity(row.state), 'draft_changed_at': row.state.get('draft_changed_at'), 'event_id': row.state.get('last_draft_event_id')}) if row else None
+        task = asyncio.create_task(self._worker(sid, trace))
         self.tasks[sid] = task
         self.track(sid, task)
         def finished(done):
+            if trace:
+                workflow.finish('cancelled' if done.cancelled() else 'discarded', trace=trace)
             if self.tasks.get(sid) is done:
                 self.tasks.pop(sid, None)
         task.add_done_callback(finished)
@@ -112,7 +119,7 @@ class DraftScheduler:
         return state and not state.get('ended') and not state.get('assessment_pending') \
             and state.get('current_problem', {}).get('id') and not state['current_problem'].get('solved')
 
-    async def _worker(self, sid):
+    async def _worker(self, sid, queued_trace=None):
         from .orchestrator import context_for
         try:
             while True:
@@ -129,34 +136,41 @@ class DraftScheduler:
                 if delay > 0:
                     await self.sleep(delay)
                     continue  # Coalesce to the latest persisted snapshot after the pause.
-                snapshot = identity(state)
-                self.last_started[sid] = utils.now()
-                self.last_key[sid] = token
-                with self.factory.begin() as db:
-                    current = db.get(Session, sid)
-                    context = context_for(db, sid)
-                    current.state = {**current.state, 'hypothesis_state': panel_for(state,
-                        state.get('hypothesis_state', {}).get('items', []), 'draft', 'analyzing')}
-                await self.broadcast(sid, {'type': 'hypotheses', 'state': view(current.state)})
-                log_event('hypothesis.start', session_id=sid, origin='draft', snapshot=snapshot)
-                try:
-                    items = await analyze(context, eligible(state), 'draft',
-                        f'draft:{snapshot[0]}:{snapshot[2]}')
-                    status, error = 'ready', None
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    log_event('hypothesis.failed', session_id=sid, origin='draft', error=type(exc).__name__)
-                    items, status, error = state.get('hypothesis_state', {}).get('items', []), 'unavailable', 'Draft analysis unavailable.'
-                with self.factory.begin() as db:
-                    current = db.get(Session, sid)
-                    fresh = deepcopy(current.state)
-                    if identity(fresh) != snapshot or not self.active(fresh):
-                        log_event('hypothesis.discarded', session_id=sid, snapshot=snapshot)
-                        continue
-                    panel = panel_for(fresh, items, 'draft', status, error=error)
-                    current.state = {**fresh, 'hypothesis_state': panel}
-                await self.broadcast(sid, {'type': 'hypotheses', 'state': panel})
+                with workflow.run('Background review · Hypothesis', session_id=sid, trace=queued_trace, independent=True, trigger={'snapshot': identity(state), 'draft_changed_at': state.get('draft_changed_at')}):
+                    queued_trace = None
+                    snapshot = identity(state)
+                    workflow.record('hypothesis.snapshot', snapshot=snapshot, trigger_event_id=state.get('last_draft_event_id'))
+                    self.last_started[sid] = utils.now()
+                    self.last_key[sid] = token
+                    with self.factory.begin() as db:
+                        current = db.get(Session, sid)
+                        context = context_for(db, sid)
+                        current.state = {**current.state, 'hypothesis_state': panel_for(state,
+                            state.get('hypothesis_state', {}).get('items', []), 'draft', 'analyzing')}
+                    await self.broadcast(sid, {'type': 'hypotheses', 'state': view(current.state)})
+                    log_event('hypothesis.start', session_id=sid, origin='draft', snapshot=snapshot)
+                    try:
+                        items = await analyze(context, eligible(state), 'draft',
+                            f'draft:{snapshot[0]}:{snapshot[2]}')
+                        status, error = 'ready', None
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        log_event('hypothesis.failed', session_id=sid, origin='draft', error=type(exc).__name__)
+                        workflow.record('hypothesis.fallback', 'errors', 'warnings', message='Draft analysis unavailable')
+                        items, status, error = state.get('hypothesis_state', {}).get('items', []), 'unavailable', 'Draft analysis unavailable.'
+                    with self.factory.begin() as db:
+                        current = db.get(Session, sid)
+                        fresh = deepcopy(current.state)
+                        if identity(fresh) != snapshot or not self.active(fresh):
+                            workflow.outcome('discarded', 'Response snapshot changed', db=db)
+                            log_event('hypothesis.discarded', session_id=sid, snapshot=snapshot)
+                            continue
+                        panel = panel_for(fresh, items, 'draft', status, error=error)
+                        current.state = {**fresh, 'hypothesis_state': panel}
+                        workflow.version_artifact('hypotheses', panel['items'], panel['version'], 'produced', db=db)
+                        workflow.artifact('hypothesis_snapshot', panel, 'produced', db=db)
+                    await self.broadcast(sid, {'type': 'hypotheses', 'state': panel})
         except asyncio.CancelledError:
             log_event('hypothesis.discarded', session_id=sid, reason='submission, question change, or shutdown')
             raise

@@ -1,7 +1,7 @@
 """Python routing with snapshot checks before committing teaching output."""
 from copy import deepcopy
 from sqlalchemy import select
-from . import config, hypothesis, plans, activity, assessment, memory, observer, planner, reflection, student_model, tools, tutor, utils
+from . import workflow, config, hypothesis, plans, activity, assessment, memory, observer, planner, reflection, student_model, tools, tutor, utils
 from .response import Response, response_for, content_key, has_content
 from .logging_setup import event as log_event
 from .db import Event, Session, append_event
@@ -34,7 +34,7 @@ def persist_observation(db, row, state: dict, kind: str, data: dict):
     return action
 
 
-def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
+def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
     row = db.get(Session, session_id)
     if row is None:
         raise ValueError('Session not found.')
@@ -92,6 +92,8 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
         state['ended'] = True
     received_at = utils.now()
     entry = append_event(db, session_id, event.type, {**data, 'revision': state['revision'], 'received_at': received_at})
+    if draft_changed:
+        state['last_draft_event_id'] = entry.id
     if event.type == 'problem_attempt':
         state['pending_assessment_event_id'] = entry.id
     decision = persist_observation(db, row, state, event.type, data)
@@ -108,6 +110,33 @@ def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
                 replan=False)
 
 
+def ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
+    row = db.get(Session, session_id)
+    if row is None:
+        raise ValueError('Session not found.')
+    trace = workflow.create_run(row.user_id, 'Answer assessment' if event.type == 'problem_attempt' else
+        'Student request' if event.type == 'student_message' or event.action == 'hint_request' else
+        'Observer · Numerical decision' if event.type == 'student_action' else event.type.replace('_', ' ').capitalize(),
+        session_id=session_id, trigger={'action': event.action, 'event_type': event.type}, db=db)
+    token = workflow.CURRENT.set(trace)
+    try:
+        with workflow.local_span(db, 'Observer · Numerical baseline', 'agents'):
+            job = _ingest(db, session_id, event)
+        if trace:
+            job['workflow_run_id'] = trace.run_id
+            workflow.update_run_data(db=db, trigger_event_id=job['event_id'], response_revision=job['response_revision'],
+                plan_version=job['plan_version'], question_id=job['problem'].get('id'))
+            workflow.record('observer.numerical', db=db, decision=job['decision'],
+                response_revision=job['response_revision'], trigger_event_id=job['event_id'],
+                status_details=row.state.get('observer', {}).get('status', {}))
+            queued = job['explicit'] or (not config.OBSERVER_LLM_ENABLED and job['decision'] == 'WAKE') or job['kind'] in ('problem_attempt', 'session_end', 'feedback')
+            if not queued:
+                workflow.finish(db=db)
+        return job
+    finally:
+        workflow.CURRENT.reset(token)
+
+
 def clear_pending_wake(db, session_id: int):
     state = memory.get_short_term_memory(db, session_id)
     state['observer'].pop('pending_wake', None)
@@ -122,6 +151,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         state = deepcopy(row.state)
         if state['ended'] or (not explicit and (state['revision'] != job['revision'] or not state['proactive_enabled'])):
             clear_pending_wake(db, sid)
+            workflow.outcome('discarded', 'Question, response or context changed', db=db)
             utils.METRICS['stale_interventions'] += 1
             return None
         context = context_for(db, sid, job['content'])
@@ -167,6 +197,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         if current['ended'] or changed_problem or (not explicit and
                 (current['revision'] != snapshot or not current['proactive_enabled'] or context_changed)):
             clear_pending_wake(db, sid)
+            workflow.outcome('discarded', 'Question, response or context changed', db=db)
             utils.METRICS['stale_interventions'] += 1
             return None
         if db.scalar(select(Event.id).where(Event.session_id == sid, Event.type == 'intervention',
@@ -211,10 +242,12 @@ async def _assess(job):
     with SessionLocal() as db:
         state = deepcopy(db.get(Session, sid).state)
         if state['ended'] or state['current_problem'].get('id') != job['problem'].get('id') or state.get('plan_version', 0) != job['plan_version']:
+            workflow.outcome('discarded', 'Submission question or plan changed')
             return []
         context = context_for(db, sid, job['content'])
         # The submission snapshot is authoritative even if the student continues editing.
         context.update(response=job['response'], workspace=job['response']['text'])
+        context['snapshot']['response_revision'] = job['response_revision']
         prior = hypothesis.eligible(state)
     result = await assessment.evaluate_attempt(job['problem'],
         job['response'] if job['unified'] else job['content'], context,
@@ -223,6 +256,7 @@ async def _assess(job):
         row = db.get(Session, sid)
         state = deepcopy(row.state)
         if state['ended'] or state['current_problem'].get('id') != job['problem'].get('id') or state.get('plan_version', 0) != job['plan_version']:
+            workflow.outcome('discarded', 'Submission question or plan changed', db=db)
             return []
         entry = append_event(db, sid, 'assessment', {**result, 'trigger_event_id': job['event_id'],
             'response': job['response'], 'response_revision': job['response_revision']})
@@ -240,10 +274,15 @@ async def _assess(job):
         job['revision'] = state['revision']
     # Assessment is committed before either optional model stage can fail.
     summary = None
+    with SessionLocal() as db:
+        context = context_for(db,sid,job['content'])
+        context.update(response=job['response'],workspace=job['response']['text'])
+        context['snapshot']['response_revision'] = job['response_revision']
     try:
         summary = await reflection.reflect_on_answer(context, result)
     except Exception as exc:
         log_event('reflection.failed', error=type(exc).__name__)
+        workflow.record('reflection.fallback', 'errors', 'warnings', message='Reflection unavailable; assessment retained.')
         activity.record('reflection', 'Reflection unavailable; assessment retained.')
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
@@ -259,18 +298,24 @@ async def _assess(job):
             append_event(db, sid, 'reflection', {**summary, 'scope': 'answer', 'tentative': not result['verified'], 'evidence_event_id': evidence_id})
         state['assessment_stages'] = {'reflection': 'ready' if summary else 'unavailable', 'hypotheses': 'analyzing'}
         memory.update_short_term_memory(db, sid, state)
+    with SessionLocal() as db:
+        context=context_for(db,sid,job['content'])
+        context.update(response=job['response'],workspace=job['response']['text'])
+        context['snapshot']['response_revision'] = job['response_revision']
     log_event('hypothesis.start', session_id=sid, origin='submission', response_revision=job['response_revision'], plan_version=job['plan_version'])
     try:
         items = await hypothesis.analyze(context, prior, 'submission', f'event:{evidence_id}', result, summary)
         status, error = 'ready', None
     except Exception as exc:
         log_event('hypothesis.failed', session_id=sid, origin='submission', error=type(exc).__name__)
+        workflow.record('hypothesis.fallback', 'errors', 'warnings', message='Submission hypothesis analysis unavailable; prior hypotheses retained')
         items, status, error = state.get('assessed_hypotheses', []), 'unavailable', 'Submission analysis unavailable; using prior hypotheses.'
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
         state = deepcopy(row.state)
         if state['ended'] or state['current_problem'].get('id') != job['problem'].get('id') \
                 or state.get('plan_version', 0) != job['plan_version']:
+            workflow.record('hypothesis.discarded', status='discarded', db=db, message='Submission hypothesis snapshot changed')
             log_event('hypothesis.discarded', session_id=sid, origin='submission')
             return [{'type': 'assessment', 'event_id': evidence_id, 'result': result}]
         snapshot = {**state, 'response_revision': job['response_revision']}
@@ -279,6 +324,8 @@ async def _assess(job):
             assessment_stages={'reflection': 'ready' if summary else 'unavailable', 'hypotheses': status})
         if status == 'ready':
             state['assessed_hypotheses'] = items
+            state['assessed_hypothesis_version'] = panel['version']
+            workflow.version_artifact('hypotheses', items, panel['version'], 'produced', db=db)
             memory.update_long_term_memory(db, row.user_id, {'hypotheses': items})
             append_event(db, sid, 'hypotheses', {'items': items, 'evidence_event_id': evidence_id,
                 'question_id': panel['question_id'], 'plan_version': panel['plan_version']})

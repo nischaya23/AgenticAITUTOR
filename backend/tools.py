@@ -5,7 +5,7 @@ import uuid
 from typing import Literal
 from openai import pydantic_function_tool
 from pydantic import Field
-from . import prompts, config, knowledge, utils
+from . import workflow, prompts, config, knowledge, utils
 from .logging_setup import event as log_event
 from .video import VideoScript
 
@@ -68,6 +68,7 @@ def function_definition(name: str) -> dict:
     definition = pydantic_function_tool(schema, name=name, description=prompts.TOOL_DESCRIPTIONS.get(name, prompts.tool_description(name)))['function']
     return {'type': 'function', **definition}
 
+@workflow.stage('Tutor · Execute tool', 'tools')
 async def invoke_registered_tool(name: str, arguments: str | dict, context: dict | None=None) -> dict:
     if name not in REGISTRY:
         raise ValueError('Unknown intervention tool.')
@@ -148,6 +149,7 @@ class Problem(utils.Schema):
     diagnostic_focus: str = Field(default='', max_length=500)
 
 
+@workflow.stage('Knowledge · Generate question', 'agents')
 async def generate_problem(concept: str, sources: list[dict] | None=None, previous_prompts: list[str] | None=None, plan: dict | None=None, plan_version: int=0, hypotheses: list[dict] | None=None, hypothesis_version: int=0, eligible_concepts: list[str] | None=None, recent_formats: list[str] | None=None, learning_context: dict | None=None) -> dict:
     log_event('question.generate', plan_version=plan_version, hypothesis_version=hypothesis_version)
     problem = await utils.call_llm(prompts.GENERATE_QUESTION, {'learning_context': learning_context or {}, 'concept': concept, 'sources': sources if sources is not None else retrieve_knowledge(concept), 'recent_questions': (previous_prompts or [])[-6:], 'plan': plan or {}, 'plan_version': plan_version,
