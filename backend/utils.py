@@ -1,6 +1,7 @@
 """Shared validation, model clients, provider adapters, and metrics."""
 import asyncio
 import json
+import random
 import time
 from types import SimpleNamespace
 from collections import Counter
@@ -92,10 +93,11 @@ def get_client() -> AsyncOpenAI:
         if not config.GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY is missing.")
 
-        return AsyncOpenAI(api_key=config.GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", timeout=config.API_TIMEOUT, max_retries=2, http_client=provider_transport())
+        # One quick SDK retry; longer backoff rounds are handled by call_llm.
+        return AsyncOpenAI(api_key=config.GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", timeout=config.API_TIMEOUT, max_retries=1, http_client=provider_transport())
     if not config.OPENAI_API_KEY:
         raise RuntimeError('Configure OPENAI_API_KEY in .env.')
-    return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=config.API_TIMEOUT, max_retries=2, http_client=provider_transport())
+    return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=config.API_TIMEOUT, max_retries=1, http_client=provider_transport())
 
 
 
@@ -339,16 +341,77 @@ def now() -> float:
 _PROVIDER_LIMITS = {}
 
 
+# Monotonic time until which new provider calls wait after an overload response (per event loop).
+_PROVIDER_COOLDOWN = {}
+
+
+def is_retryable(exc: BaseException) -> bool:
+    """Transient provider failures: overload/rate limit (429, 5xx), conflicts and dropped connections.
+
+    Timeouts are not retried here: each one already waited the full request budget.
+    """
+    from openai import APIConnectionError, APIStatusError, APITimeoutError
+    if isinstance(exc, APITimeoutError):
+        return False
+    if isinstance(exc, APIConnectionError):
+        return True
+    return isinstance(exc, APIStatusError) and (exc.status_code in (408, 409, 429) or exc.status_code >= 500)
+
+
+def backoff_delay(attempt: int, exc: BaseException | None = None) -> float:
+    """Exponential backoff with jitter, honouring a provider Retry-After header when present."""
+    delay = min(config.LLM_MAX_BACKOFF_SECONDS, config.LLM_BACKOFF_SECONDS * 2 ** (attempt - 1))
+    delay *= random.uniform(.5, 1)  # Jitter so parallel callers do not retry in lockstep.
+    response = getattr(exc, 'response', None)
+    hint = response.headers.get('retry-after') if response is not None else None
+    try:
+        delay = max(delay, min(float(hint), config.LLM_MAX_BACKOFF_SECONDS)) if hint else delay
+    except ValueError:
+        pass
+    return delay
+
+
+def _model_for(attempt: int, requested: str | None) -> str | None:
+    """Keep the caller's model; otherwise switch to the configured backup model for later attempts."""
+    if requested:
+        return requested
+    fallback = config.GEMINI_FALLBACK_MODEL if config.LLM_PROVIDER == 'gemini' else config.OPENAI_FALLBACK_MODEL
+    return fallback if fallback and attempt > max(1, config.LLM_MAX_ATTEMPTS // 2) else None
+
+
+async def _wait_for_cooldown(loop):
+    remaining = _PROVIDER_COOLDOWN.get(loop, 0) - time.monotonic()
+    if remaining > 0:
+        workflow.record('provider.cooldown', status='warnings', wait_ms=round(remaining*1000))
+        await asyncio.sleep(remaining)
+
+
 async def call_llm(*args, **kwargs):
     loop = asyncio.get_running_loop()
     limiter = _PROVIDER_LIMITS.setdefault(loop, asyncio.Semaphore(config.PROVIDER_CONCURRENCY))
-    with workflow.span('Provider slot', 'agents', status_label='Waiting for model'):
-        queued_at = time.perf_counter()
-        await limiter.acquire()
-        workflow.record('model.slot_acquired', queue_ms=round((time.perf_counter()-queued_at)*1000, 2))
-    try:
-        with workflow.span(kwargs.get('operation') or 'Model request', 'agents',
-                provider=config.LLM_PROVIDER, model=kwargs.get('model') or (config.GEMINI_MODEL if config.LLM_PROVIDER == 'gemini' else config.OPENAI_MODEL)):
-            return await _call_llm(*args, **kwargs)
-    finally:
-        limiter.release()
+    requested_model = kwargs.pop('model', None)
+    attempts = max(1, config.LLM_MAX_ATTEMPTS)
+    for attempt in range(1, attempts + 1):
+        model = _model_for(attempt, requested_model)
+        await _wait_for_cooldown(loop)
+        with workflow.span('Provider slot', 'agents', status_label='Waiting for model'):
+            queued_at = time.perf_counter()
+            await limiter.acquire()
+            workflow.record('model.slot_acquired', queue_ms=round((time.perf_counter()-queued_at)*1000, 2))
+        try:
+            with workflow.span(kwargs.get('operation') or 'Model request', 'agents',
+                    provider=config.LLM_PROVIDER, model=model or (config.GEMINI_MODEL if config.LLM_PROVIDER == 'gemini' else config.OPENAI_MODEL)):
+                return await _call_llm(*args, **({**kwargs, 'model': model} if model else kwargs))
+        except Exception as exc:
+            if attempt == attempts or not is_retryable(exc):
+                raise
+            delay = backoff_delay(attempt, exc)
+            # Overload is shared: make every caller pause, not only this one.
+            _PROVIDER_COOLDOWN[loop] = max(_PROVIDER_COOLDOWN.get(loop, 0), time.monotonic() + delay)
+            workflow.record('provider.backoff', status='warnings', attempt=attempt, next_attempt=attempt + 1,
+                http_status=getattr(exc, 'status_code', None), wait_ms=round(delay*1000))
+            logs.event('llm.retry', prompt=kwargs.get('operation'), attempt=attempt, error=type(exc).__name__,
+                       wait_ms=round(delay*1000))
+        finally:
+            # The slot is released before waiting so other work is not blocked by this backoff.
+            limiter.release()

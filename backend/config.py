@@ -22,6 +22,11 @@ COOLDOWN_SECONDS = float(os.getenv('COOLDOWN_SECONDS', '45'))
 AGGREGATION_SECONDS = float(os.getenv('AGGREGATION_SECONDS', '5'))
 TYPING_GRACE_SECONDS = float(os.getenv('TYPING_GRACE_SECONDS', '3'))
 PROVIDER_CONCURRENCY = max(1, int(os.getenv('PROVIDER_CONCURRENCY', '3')))
+# Resilience for overloaded providers (HTTP 429/5xx): rounds of attempts on top of the SDK's own quick retry,
+# exponential backoff with jitter, and a shared cooldown so parallel calls back off together.
+LLM_MAX_ATTEMPTS = max(1, int(os.getenv('LLM_MAX_ATTEMPTS', '4')))
+LLM_BACKOFF_SECONDS = float(os.getenv('LLM_BACKOFF_SECONDS', '2'))
+LLM_MAX_BACKOFF_SECONDS = float(os.getenv('LLM_MAX_BACKOFF_SECONDS', '30'))
 HYPOTHESIS_PAUSE_SECONDS = 8
 HYPOTHESIS_INTERVAL_SECONDS = 30
 BANDIT_WARMUP = int(os.getenv('BANDIT_WARMUP', '12'))
@@ -35,6 +40,9 @@ WEB_SEARCH_CONTACT = os.getenv('WEB_SEARCH_CONTACT', 'https://github.com/nischay
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
+# Optional backup models used for the later attempts when the main model stays overloaded.
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "")
+OPENAI_FALLBACK_MODEL = os.getenv("OPENAI_FALLBACK_MODEL", "")
 OBSERVER_LLM_ENABLED = os.getenv('OBSERVER_LLM_ENABLED', 'true').lower() == 'true'
 OBSERVER_REVIEW_SECONDS = 30
 OBSERVER_PAUSE_SECONDS = 8

@@ -17,5 +17,5 @@ def diagnose_misconception(assessment: dict) -> list[str]:
     return assessment.get('misconceptions', [])
 
 def estimate_mastery(previous: float, score: float, verified: bool) -> float:
-    weight = 0.2 if verified else 0.04
-    return max(0, min(1, previous * (1 - weight) + score * weight))
+    from .student_model import bkt_update  # single source of truth for mastery
+    return bkt_update(previous, score, verified)

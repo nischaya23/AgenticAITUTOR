@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from backend import main, memory, tools, orchestrator
 from backend.db import Session
+from backend.student_model import bkt_update
 
 
 def prepare(client):
@@ -34,6 +35,8 @@ def test_correct_answers_advance_and_complete_automatically(app_env):
     prompts=[]
     with client.websocket_connect(f'/ws/{sid}') as ws:
         for _ in range(4):
+            if study['state'].get('study_complete'):
+                break
             old=study['state']['current_problem']['id']
             prompts.append(study['state']['current_problem']['prompt'])
             with factory() as db:
@@ -47,7 +50,7 @@ def test_correct_answers_advance_and_complete_automatically(app_env):
                     study=message;break
     assert study['state']['study_complete']
     assert study['graph']['nodes'][0]['mastery']>=study['mastery_target']
-    assert len(set(prompts))==4
+    assert len(set(prompts))==len(prompts)>=2  # BKT reaches the target after a few correct answers.
 
 
 def test_wrong_answer_keeps_current_question_and_updates_mastery(app_env):
@@ -61,7 +64,7 @@ def test_wrong_answer_keeps_current_question_and_updates_mastery(app_env):
             assert message['type']!='error',message
             if message['type']=='study_state':break
     assert message['state']['current_problem']['id']==old
-    assert message['graph']['nodes'][0]['mastery']==.4
+    assert message['graph']['nodes'][0]['mastery']==round(bkt_update(None,0,True),4)
 
 
 def test_graph_prerequisites_control_topic_selection():

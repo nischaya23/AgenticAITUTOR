@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 from backend import config, db, knowledge, main, memory, observer, orchestrator, planner, reflection, tools, tutor, utils
+from backend.student_model import bkt_update
 from conftest import receive_until
 
 
@@ -126,7 +127,7 @@ async def test_wake_reflection_bandit_and_mastery_persist(app_env):
     with factory() as connection:
         model = memory.get_long_term_memory(connection,row.user_id)
         assert model['policy']['updates'] == 1
-        assert model['mastery']['Binary Search'] == .6
+        assert model['mastery']['Binary Search'] == round(bkt_update(None, 1, True), 4)
         assert model['memories']
         reflections = connection.scalars(select(db.Event).where(db.Event.type=='reflection')).all()
         assert next(r for r in reflections if 'reward' in r.data).data['reward'] == .5
@@ -320,7 +321,7 @@ async def test_repeated_correct_answer_cannot_inflate_mastery(app_env):
     for _ in range(2):
         with pytest.raises(ValueError, match='already being assessed or solved'):
             ingest(factory,sid,type='problem_attempt',content='1',problem_id='binary-search-first')
-    assert client.get('/api/student').json()['mastery']['Binary Search']==.6
+    assert client.get('/api/student').json()['mastery']['Binary Search']==round(bkt_update(None,1,True),4)
 
 
 async def test_reasoning_assessment_is_not_exact_answer_check(app_env):

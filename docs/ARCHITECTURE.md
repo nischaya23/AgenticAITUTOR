@@ -38,7 +38,7 @@ Session memory lives in `sessions.state`. Long-term student memory and policy pa
 
 Students can correct summaries/goals and dispute misconceptions. Grades, mastery, history and policy parameters are read-only. Corrections use a memory revision to reject stale saves. Student goals survive later agent-generated goal updates.
 
-Assessment scores are provisional LLM judgments between zero and one. Mastery uses `new = 0.96 * old + 0.04 * score` for current LLM grading. Hypothesis confidence is assigned by the Hypothesis LLM, not computed from a Bayesian formula.
+Assessment scores are provisional LLM judgments between zero and one. Mastery uses Bayesian Knowledge Tracing (`backend/student_model.py`): each concept stores P(known), updated by Bayes' rule on each attempt (score treated as soft evidence between the correct/wrong posteriors) followed by a learning transition. Defaults are P(L0)=0.3, P(T)=0.1, slip/guess 0.1/0.2 for verified checks and 0.15/0.25 for provisional LLM grading; they are hand-set, not fitted. Hypothesis confidence is assigned by the Hypothesis LLM, not computed from a Bayesian formula.
 
 LinUCB evaluates WAIT and WAKE with nine scaled features plus an intercept:
 
