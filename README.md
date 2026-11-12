@@ -1,6 +1,6 @@
 # Studyroom — Agentic AI Tutor
 
-Describe what you want to learn or upload course notes. Studyroom builds a learning map and tutors you through text questions. It can research sources, offer proactive help, and generate interactive React Flow slideshows. You can review and correct parts of your learning memory.
+Describe what you want to learn or upload course notes. Studyroom builds a learning map and tutors you through text questions. It can research sources, offer proactive help, and generate interactive React Flow slideshows. The Memory tab shows what the tutor remembers across sessions.
 
 The application uses FastAPI, React/TypeScript, SQLite, and the configured OpenAI or Gemini provider. Agents are cooperating Python modules; no external agent framework is required.
 
@@ -47,7 +47,7 @@ The Python backend coordinates preparation. During study, the orchestrator route
 - The learning map shows concepts, prerequisites and any verified source quotes. Click an unlocked concept to focus on it.
 - Practice questions and workspace answers are text-only.
 - Request hints, explanations, text review, guiding questions, visualizations or web search. Automatic help can be disabled in the workspace.
-- The Memory tab shows session context, long-term mastery, goals, reflections, hypotheses and misconceptions. Correct summaries/goals or dispute misconceptions without changing grades or deleting evidence.
+- The Memory tab shows a read-only table of long-term memory by concept, including estimated mastery, summaries, possible gaps and next steps.
 - Visualizations show a graph with highlighted nodes, step explanations, and playback controls.
 
 ## Observer

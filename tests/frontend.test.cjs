@@ -36,7 +36,16 @@ async function setup(t, { draft, authenticated = true, openSession = true, faile
   const requests = [];
   let socket;
   let operationReady=false;
-  let memorySnapshot={revision:1,short_term:{concept:'Binary Search',question:'Find the first 2.',response:{text:workspace},plan:study.state.plan,assessment_pending:false},long_term:{mastery:{'Binary Search':.5},hypotheses:[]},items:[{id:'summary1',kind:'summary',original_text:'Practiced search.',effective_text:'Practiced search.',disputed:false,student_note:'',edits:[]}]};
+  const memorySnapshot = {
+    short_term: {question:'Find the first 2.', response:{text:workspace}},
+    long_term: {
+      mastery:{'binary search':.5},
+      concept_memory:{'binary search':{name:'Binary Search',summary:'Practiced search.',next_goal:'Trace duplicate values.'}},
+      hypotheses:[{id:'first',concept:'Binary Search',status:'tentative',possible_gap:'May stop at the first midpoint match.'}],
+      learner_profile:'Prefers worked examples.',
+      student_goals:['Explain the boundary invariant.'],
+    },
+  };
   const intervals=[];
   const setInterval=w.setInterval.bind(w);
   w.setInterval=(callback,delay,...args)=>{intervals.push({callback,delay});return setInterval(callback,delay,...args);};
@@ -64,7 +73,6 @@ async function setup(t, { draft, authenticated = true, openSession = true, faile
       {id: 60, type: 'student_message', data: {content: 'Question from the second chat'}},
     ]})};
     if(url.endsWith('/memory')) return {ok:true,json:async()=>memorySnapshot};
-    if(url.endsWith('/memory/corrections')) {const body=JSON.parse(options.body);requests.push({path:url,...body});memorySnapshot={...memorySnapshot,revision:2,items:memorySnapshot.items.map(item=>({...item,effective_text:body.text}))};return {ok:true,json:async()=>memorySnapshot};}
     if(url==='/api/material-jobs') {
       await uploadGate;
       operationReady = !failedUpload;
@@ -344,22 +352,21 @@ test('new chat offers topic descriptions and optional uploads', async t => {
 });
 
 
-test('memory tab shows persisted memory and saves corrections',async t=>{
-  const {document,window,requests}=await setup(t);
+test('memory tab shows long-term memory in a read-only concept table',async t=>{
+  const {document}=await setup(t);
   document.querySelector('#memory-tab').click();
-  const panel=await until(()=>document.querySelector('[aria-label="Learning memory"]'));
-  await until(()=>panel.textContent.includes('Practiced search.'));
-  assert.match(panel.textContent,/Short-term/);
-  assert.match(panel.textContent,/50%/);
-  [...panel.querySelectorAll('button')].find(button=>button.textContent==='Correct').click();
-  const textarea=await until(()=>panel.querySelector('textarea'));
-  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(textarea,'I practiced duplicates.');
-  textarea.dispatchEvent(new window.Event('input',{bubbles:true}));
-  await new Promise(resolve=>setTimeout(resolve,20));
-  panel.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
-  await until(()=>requests.some(request=>request.path.endsWith('/memory/corrections')));
-  assert.equal(requests.at(-1).expected_revision,1);
-  assert.equal(requests.at(-1).text,'I practiced duplicates.');
+  const table=await until(()=>document.querySelector('#memory-panel table'));
+  assert.equal(table.tBodies[0].rows.length, 1);
+  assert.match(table.textContent,/Binary Search/);
+  assert.match(table.textContent,/50% estimated mastery/);
+  assert.match(table.textContent,/Practiced search/);
+  assert.match(table.textContent,/Possible gap · May stop at the first midpoint match/);
+  assert.match(table.textContent,/Trace duplicate values/);
+  assert.match(table.textContent,/Prefers worked examples/);
+  assert.match(table.textContent,/Explain the boundary invariant/);
+  const panel = document.querySelector('#memory-panel');
+  assert.doesNotMatch(panel.textContent,/Find the first 2/);
+  assert.equal(panel.querySelector('button, input, textarea, form'),null);
 });
 
 test('topic preparation shows a short flow and resolves ambiguity before opening study',async t=>{
