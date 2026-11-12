@@ -6,12 +6,9 @@ import pytest
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
-<<<<<<< HEAD
 from backend import config, db, knowledge, main, memory, observer, orchestrator, planner, reflection, tools, tutor, utils
 from backend.student_model import bkt_update
-=======
 from backend import config, db, features, knowledge, main, memory, orchestrator, planner, reflection, tools, tutor, utils
->>>>>>> 8b7ce7554cc5d2d792ee16c959492572129f958b
 from conftest import receive_until
 
 
@@ -121,13 +118,10 @@ async def test_approved_help_reflection_and_mastery_persist(app_env):
     assert outputs[0]['type'] == 'assessment' and outputs[0]['result']['correct']
     with factory() as connection:
         model = memory.get_long_term_memory(connection,row.user_id)
-<<<<<<< HEAD
         assert model['policy']['updates'] == 1
         assert model['mastery']['Binary Search'] == round(bkt_update(None, 1, True), 4)
-=======
         assert model['effective_interventions']['guiding_question'] == {'observations': 1, 'reward_sum': .5}
         assert model['mastery']['Binary Search'] == .6
->>>>>>> 8b7ce7554cc5d2d792ee16c959492572129f958b
         assert model['memories']
         reflections = connection.scalars(select(db.Event).where(db.Event.type=='reflection')).all()
         assert next(r for r in reflections if 'reward' in r.data).data['reward'] == .5
