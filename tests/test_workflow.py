@@ -302,29 +302,28 @@ async def test_sdk_retry_attempts_are_visible_without_extra_model_invocations(ap
     assert 'credential-must-stay-private' not in json.dumps(detail)
 
 
-async def test_video_operation_stays_active_after_script_run_and_discards_stale_output(app_env):
+async def test_preparation_operation_stays_active_after_parent_run(app_env):
     client, factory, _ = app_env
     sid=session(client)
     started,release=asyncio.Event(),asyncio.Event()
     async def work():
-        with workflow.span('Render and deliver', 'tools'):
+        with workflow.span('Prepare material', 'tools'):
             started.set()
             await release.wait()
-        await operations.progress('discarded', message='Question changed; animation not delivered.')
-        return {'discarded':True}
-    with workflow.run('Tutor script',session_id=sid) as script:
-        oid=operations.create(factory,1,'video',{'session_id':sid})
+        return {'id':'prepared-material'}
+    with workflow.run('Start preparation',session_id=sid) as parent:
+        oid=operations.create(factory,1,'upload',{'session_id':sid})
         task=operations.spawn(factory,oid,work)
     await started.wait()
     page=client.get(f'/api/sessions/{sid}/workflow').json()
-    renderer=next(r for r in page['active_runs'] if r['operation_id']==oid)
-    assert renderer['id'] != script.run_id
-    assert renderer['trigger']['parent_run_id'] == script.run_id
-    assert get_detail(client,script.run_id)['status'] == 'completed'
+    preparation=next(r for r in page['active_runs'] if r['operation_id']==oid)
+    assert preparation['id'] != parent.run_id
+    assert preparation['trigger']['parent_run_id'] == parent.run_id
+    assert get_detail(client,parent.run_id)['status'] == 'completed'
     release.set()
     await task
-    assert get_detail(client,renderer['id'])['status'] == 'discarded'
-    assert operations.snapshot(factory,oid,1)['result']['discarded']
+    assert get_detail(client,preparation['id'])['status'] == 'completed'
+    assert operations.snapshot(factory,oid,1)['result']['id'] == 'prepared-material'
 
 
 def test_preparation_clarification_runs_attach_once_to_each_studying_session(app_env):

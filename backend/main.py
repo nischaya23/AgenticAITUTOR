@@ -50,7 +50,8 @@ async def lifespan(app):
                         for k, v in row.state.get('assessment_stages', {}).items()}}
             state = dict(row.state)
             state['response'] = response_for(state)
-            state['pending_video'] = None
+            state.pop('pending_video', None)
+            state.pop('last_video_operation', None)
             problem = dict(state.get('current_problem', {}))
             if problem.get('format') in ('diagram_construction', 'diagram_interpretation') and not problem.get('solved'):
                 state['current_problem'] = {}
@@ -76,8 +77,6 @@ async def lifespan(app):
     DRAFTS = None
     if REVIEWS:
         REVIEWS.cancel_all()
-    from .video import _LOCKS
-    _LOCKS.clear()
     logs.shutdown()
 
 
@@ -230,15 +229,35 @@ def health():
     return {'status': 'ok', 'provider': config.LLM_PROVIDER, 'model': config.GEMINI_MODEL if config.LLM_PROVIDER == 'gemini' else config.OPENAI_MODEL, 'configured': bool(key)}
 
 
+class CreateSessionRequest(utils.Schema):
+    preparation_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
 @app.post('/api/sessions')
-def create_session(request: Request):
+def create_session(request: Request, body: CreateSessionRequest | None = None):
     with SessionLocal.begin() as db:
         user_id = request.state.user_id
+        preparation = None
+        if body is not None and body.preparation_id is not None:
+            # Serialize claims for a preparation even if two requests arrive together.
+            db.connection().exec_driver_sql('BEGIN IMMEDIATE')
+            preparation = db.get(Operation, body.preparation_id)
+            if preparation is None or preparation.user_id != user_id or preparation.kind not in ('upload', 'topic'):
+                raise HTTPException(404, 'Preparation not found.')
+            if preparation.status != 'ready' or not preparation.data.get('result', {}).get('id'):
+                raise HTTPException(409, 'Preparation is not ready.')
+            existing = preparation.data.get('study_session_id')
+            if existing is not None:
+                row = db.get(Session, existing)
+                if row is not None and row.user_id == user_id:
+                    return {'id': row.id, 'state': public_state(row.state)}
         state = utils.SessionData(log_uuid=uuid4().hex).model_dump(mode='json')
         state['assessed_hypotheses'] = memory.get_long_term_memory(db, user_id).get('hypotheses', [])
         row = Session(user_id=user_id, state=state)
         db.add(row)
         db.flush()
+        if preparation is not None:
+            preparation.data = {**preparation.data, 'study_session_id': row.id}
         with logs.scope(row.id, state['log_uuid']):
             memory.update_long_term_memory(db, user_id, {})
             append_event(db, row.id, 'session_started', {})
@@ -931,9 +950,6 @@ async def websocket(socket: WebSocket, session_id: int):
                     await broadcast(session_id, {'type': 'observer_status', **observer_status(require_session(db, session_id).state)})
                 if REVIEWS:
                     REVIEWS.schedule(session_id, job)
-                if job['kind'] == 'session_end':
-                    from .features import cancel_videos
-                    cancel_videos(session_id)
                 if REVIEWS and (job['kind'] == 'session_end' or (job['kind'] == 'preferences' and event.proactive_enabled is False)):
                     REVIEWS.cancel(session_id)
                 if job['explicit'] or job['kind'] in ('problem_attempt', 'session_end', 'feedback'):

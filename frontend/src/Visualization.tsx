@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Background, Controls, MarkerType, ReactFlow, type NodeChange } from '@xyflow/react';
 import { useReducedMotion } from 'motion/react';
-import type { Graph } from './types';
-type Visit = {node: string; via: string | null};
+import type { Graph, GraphVisualization, Visit } from './types';
 import { useTheme } from './Theme';
 import '@xyflow/react/dist/style.css';
 
@@ -32,8 +31,9 @@ function graphPositions(graph: Graph, visits?: Visit[]) {
   }));
 }
 
-export function FlowGraph({ graph, visits, step = 0, masteryTarget, label, onSelect }: {
+export function FlowGraph({ graph, visits, step = 0, activeNodes, masteryTarget, label, onSelect }: {
   graph: Graph; visits?: Visit[]; step?: number; masteryTarget?: number; label: string;
+  activeNodes?: string[];
   onSelect?: (concept: string) => void;
 }) {
   const [moved, setMoved] = useState(new Map<string, { x: number; y: number }>());
@@ -41,6 +41,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label, onSel
   const reducedMotion = useReducedMotion();
   const positions = graphPositions(graph, visits);
   const current = visits?.[step];
+  const active = new Set(activeNodes);
   const visited = new Set(visits?.slice(0, step + 1).map(visit => visit.node));
   const selectable = (node: Graph['nodes'][number]) => Boolean(onSelect && node.available && !node.active);
   const nodes = graph.nodes.map(node => ({
@@ -50,7 +51,7 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label, onSel
       {masteryTarget !== undefined && <small>{node.mastery == null ? 'Not assessed yet'
         : 'Estimated mastery: ' + Math.round(node.mastery * 100) + '%'}</small>}
       {onSelect && !node.available && <small>Locked: finish its prerequisites</small>}</> },
-    className: [node.active || current?.node === node.id ? 'flow-active'
+    className: [node.active || current?.node === node.id || active.has(node.id) ? 'flow-active'
       : visited.has(node.id) || (node.mastery ?? -1) >= (masteryTarget ?? 1) ? 'flow-visited' : '',
       selectable(node) ? 'flow-selectable' : '', onSelect && !node.available ? 'flow-locked' : ''].join(' ').trim(),
     ariaLabel: selectable(node) ? 'Study ' + node.label : node.label,
@@ -78,5 +79,50 @@ export function FlowGraph({ graph, visits, step = 0, masteryTarget, label, onSel
       <Background /><Controls showInteractive={false} />
     </ReactFlow>
   </div>;
+}
+
+export function VisualPlayer({ data }: { data: GraphVisualization }) {
+  const [index, setIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const slides = 'steps' in data ? data.steps : [];
+  const last = slides.length - 1;
+  const slide = slides[index];
+  const visits = data.kind === 'graph_traversal' || data.kind === 'tree_traversal' ? data.steps : undefined;
+
+  useEffect(() => {
+    if (!playing || index >= last) return;
+    const timer = window.setTimeout(() => {
+      setIndex(index + 1);
+      if (index + 1 === last) setPlaying(false);
+    }, 1250 / speed);
+    return () => window.clearTimeout(timer);
+  }, [index, last, playing, speed]);
+
+  function seek(next: number) {
+    setPlaying(false);
+    setIndex(next);
+  }
+
+  return <section className="visual-player" aria-label={data.title}>
+    <h3>{data.title}</h3>
+    <FlowGraph graph={data} visits={visits} step={index}
+      activeNodes={slide && 'active_nodes' in slide ? slide.active_nodes : undefined} label={data.title} />
+    {slide && <>
+      <p className="step-description" aria-live="polite">Step {index + 1} of {slides.length}. {slide.explanation}</p>
+      <div className="player-controls">
+        <button type="button" onClick={() => seek(0)}>Restart</button>
+        <button type="button" disabled={index === 0} onClick={() => seek(index - 1)}>Previous</button>
+        <button type="button" disabled={last < 1} onClick={() => {
+          if (!playing && index === last) setIndex(0);
+          setPlaying(!playing);
+        }}>{playing ? 'Pause' : 'Play'}</button>
+        <button type="button" disabled={index === last} onClick={() => seek(index + 1)}>Next</button>
+        <label>Speed <select value={speed} onChange={event => setSpeed(Number(event.target.value))}>
+          {[0.5, 1, 1.5, 2].map(value => <option key={value} value={value}>{value}×</option>)}
+        </select></label>
+      </div>
+    </>}
+  </section>;
 }
 

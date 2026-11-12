@@ -8,9 +8,9 @@ import { ThemeProvider, ThemeToggle } from './Theme';
 import LearningPlanPanel from './LearningPlan';
 import Hypotheses from './Hypotheses';
 import Workspace, { annotationRange } from './Workspace';
-import { FlowGraph } from './Visualization';
+import { FlowGraph, VisualPlayer } from './Visualization';
 import MemoryPanel from './Memory';
-import { PreparationPanel, VideoPlayer, VideoJob } from './Progress';
+import { PreparationPanel } from './Progress';
 import ActivityFlow, { updateTutorFlow, type TutorStep, type WorkflowEvent } from './ActivityFlow';
 import type { Annotation, Assessment, HypothesisState, Response as StudentResponse, HistoryItem, Observer, PlanState, Result, Study, Tool, ProgressEvent } from './types';
 import '../styles.css';
@@ -43,15 +43,19 @@ type Message = Study | PlanState | {
   | { type: 'session_summary'; result: { summary: string; next_goal: string } }
   | { type: 'memory_changed' }
   | ({ type: 'research_progress' } & ProgressEvent)
-  | { type: 'video_pending'; operation_id: string; title: string }
   | { type: 'error'; message: string };
 
 function Intervention({ result }: { result: Result }) {
   const { metadata } = result;
+  const visual = metadata.visualization;
   return <>
     <strong>{label(result.type)}</strong><p>{result.content}</p>
-    {metadata.video && <VideoPlayer video={metadata.video} />}
-    {!metadata.video && (metadata.nodes || 'visualization' in metadata) && <p className="muted">Earlier animation archived. Request a new video to see this topic.</p>}
+    {visual && ['slideshow', 'graph_traversal', 'tree_traversal', 'concept_graph'].includes(visual.kind)
+      && <VisualPlayer data={visual} />}
+    {!visual && metadata.nodes && metadata.nodes.length > 0 && metadata.edges && <VisualPlayer data={{
+      kind: 'slideshow', title: 'Visualization', nodes: metadata.nodes, edges: metadata.edges,
+      steps: (metadata.steps ?? []).map(explanation => ({ explanation, active_nodes: [] })),
+    }} />}
     {metadata.retrieved_sources?.length ? <details><summary>Retrieved sources</summary><ul>{metadata.retrieved_sources.map(source =>
       <li key={source.id}>{source.url ? <a href={source.url} target="_blank" rel="noopener noreferrer">{source.source}</a> : source.source}</li>)}</ul></details> : null}
   </>;
@@ -136,8 +140,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
 
   function applyStudy(view: Study, sessionId = sid) {
     const previous = current.current;
-    if(previous?.material.id !== view.material.id){setVideoJobs([]);}
-    if(view.state.last_video_operation) setVideoJobs(items => items.some(item=>item.id===view.state.last_video_operation) ? items : [...items,{id:view.state.last_video_operation!,title:'Learning animation'}]);
     const serverResponse = { text: view.state.response?.text ?? view.state.workspace };
     if(previous?.material.id === view.material.id && (previous.state.plan_version ?? 0) > (view.state.plan_version ?? 0)){
       view = { ...view, state: { ...view.state, plan: previous.state.plan, plan_version: previous.state.plan_version, plan_suggestion: previous.state.plan_suggestion } };
@@ -192,7 +194,6 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       case 'workflow_events':
         setTutorSteps(steps => updateTutorFlow(steps, message.events));
         break;
-      case 'video_pending': setVideoJobs(items => [...items, {id: message.operation_id, title: message.title}]); break;
       case 'memory_activity': break;
       case 'plan': applyPlan(message); break;
       case 'hypotheses':
@@ -329,10 +330,12 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
 
   const [topic, setTopic] = useState('');
   const [preparation, setPreparation] = useState<{id: string | null; upload: boolean} | null>(null);
-  const [videoJobs, setVideoJobs] = useState<{id: string; title: string}[]>([]);
+  const startingPreparation = useRef(false);
   const [memoryVersion, setMemoryVersion] = useState(0);
 
   async function startPreparation(files?: File[]) {
+    if (uploading || startingPreparation.current) return;
+    startingPreparation.current = true;
     setUploading(true); onUploadChange(true); setNotice('');
     const upload = Boolean(files);
     setPreparation({id: null, upload});
@@ -345,13 +348,14 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
       setPreparation({id: job.id, upload});
     } catch (error) {
       setPreparation(preparation); setNotice((error as Error).message); setUploading(false); onUploadChange(false);
-    }
+    } finally { startingPreparation.current = false; }
   }
 
-  async function openPrepared(materialId: string) {
+  async function openPrepared(materialId: string, preparationId: string) {
     setUploading(true); onUploadChange(true);
+    setNotice('');
     try {
-      const session = await api<{ id: number }>('/api/sessions', { method: 'POST' });
+      const session = await post<{ id: number }>('/api/sessions', { preparation_id: preparationId });
       const next = await post<Study>('/api/sessions/' + session.id + '/study', { material_id: materialId });
       setHistory([]); setChat(''); setSummary(''); setAssessment(''); setTutorSteps([]);
       revision.current = 0; applyStudy(next, session.id); setSid(session.id); onCreated(session.id);
@@ -599,12 +603,11 @@ function App({ user, logout, initialSession, onCreated, onUploadChange, onSessio
               const element = event.currentTarget;
               conversationAtBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
             }}>
-            {!history.length && !videoJobs.length && <div className="conversation-welcome"><Icon name="chat" />
+            {!history.length && <div className="conversation-welcome"><Icon name="chat" />
               <h3>Let’s work through it.</h3><p>Ask about {study.state.current_concept}, request a hint, or try the question in your workspace.</p>
               <button type="button" disabled={disabled || busy} onClick={() => requestTool('guiding_question')}>Help me get started<Icon name="arrow" /></button>
             </div>}
             {history.map(renderMessage)}
-            {videoJobs.map(job => <VideoJob key={job.id} id={job.id} title={job.title} />)}
           </div>
           <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(chat); }}>
             <label className="sr-only" htmlFor="chat">Ask your tutor</label>

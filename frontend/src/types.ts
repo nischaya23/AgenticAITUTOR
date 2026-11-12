@@ -13,8 +13,13 @@ export type Graph = {
   nodes: { id: string; label: string; mastery?: number | null; active?: boolean; available?: boolean }[];
   edges: { source: string; target: string }[];
 };
-export type Video = { url: string; title: string; duration: number;
-  chapters: { start: number; end: number; text: string }[] };
+export type Slide = { explanation: string; active_nodes: string[] };
+export type Visit = { node: string; via: string | null; explanation: string };
+export type GraphVisualization = Graph & { title: string } & (
+  | { kind: 'slideshow'; steps: Slide[] }
+  | { kind: 'graph_traversal' | 'tree_traversal'; steps: Visit[] }
+  | { kind: 'concept_graph' }
+);
 export type Observer = { decision?: string; reason?: string; revision?: number; decision_source?: string; feedback_intervention_id?: number | null };
 export type Session = {
   current_problem: { id?: string; prompt?: string; solved?: boolean;
@@ -24,7 +29,7 @@ export type Session = {
   proactive_enabled?: boolean; study_complete?: boolean; ended: boolean; observer_status: Observer; assessment_pending?: boolean; focus_concept?: string | null;
   response?: Response; response_revision?: number; hypothesis_state?: HypothesisState;
   last_assessment?: Assessment; assessment_stages?: { reflection: string; hypotheses: string };
-  question_generation_error?: string | null; pending_video?: string | null; last_video_operation?: string;
+  question_generation_error?: string | null;
 };
 export type Study = {
   type: 'study_state'; state: Session; graph: Graph; mastery_target: number;
@@ -36,7 +41,7 @@ export type Tool = 'hint' | 'explanation' | 'highlight' | 'visualization' | 'gui
 export type Result = {
   type: Tool; content: string;
   metadata: Partial<Graph> & {
-    annotations?: Annotation[]; video?: Video; steps?: string[];
+    annotations?: Annotation[]; visualization?: GraphVisualization; steps?: string[];
     retrieved_sources?: {id: string; source: string; url?: string}[];
     target?: 'workspace' | 'material'; source_id?: string; quote?: string; start?: number; end?: number;
   };
@@ -53,8 +58,8 @@ export type PlanState = { type: 'plan'; plan: Partial<LearningPlan>; plan_versio
 
 export type ProgressEvent = { id?: number; kind: string; message?: string; title?: string; url?: string;
   query?: string; reason?: string; quote?: string; timestamp?: string };
-export type Operation = { kind?: string; content?: string; id: string; status: string; error?: string; events: ProgressEvent[];
-  result?: { id?: string; type?: string; discarded?: boolean; url?: string; meanings?: Meaning[] } };
+export type Operation = { kind?: string; id: string; status: string; error?: string; events: ProgressEvent[];
+  result?: { id?: string; type?: string; meanings?: Meaning[] } };
 export type MemoryItem = { id: string; kind: string; original_text: string; effective_text: string;
   concept?: string; source_event_id?: number; updated_at?: string; disputed: boolean; student_note: string;
   edits: {at: string; action: string; before: string; text: string}[] };

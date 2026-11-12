@@ -27,7 +27,8 @@ async function until(predicate) {
   throw Error('Expected UI update did not occur');
 }
 
-async function setup(t, { draft, authenticated = true, openSession = true, failedUpload = false, uploadGate, savedPreparation } = {}) {
+async function setup(t, { draft, authenticated = true, openSession = true, failedUpload = false,
+  uploadGate, savedPreparation, sessionGate } = {}) {
   const dom = new JSDOM(html, { url: 'http://localhost:8000', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window;
@@ -46,7 +47,11 @@ async function setup(t, { draft, authenticated = true, openSession = true, faile
   w.fetch = async (url, options) => {
     if (url === '/api/auth/me') return { ok: authenticated, status: authenticated ? 200 : 401,
       json: async () => authenticated ? {user: {id: 1, email: 'student@example.com'}} : {detail: 'Please log in.'} };
-    if (url === '/api/sessions' && options?.method==='POST') return {ok:true,json:async()=>({id:3})};
+    if (url === '/api/sessions' && options?.method==='POST') {
+      requests.push({path:url,...JSON.parse(options.body ?? '{}')});
+      await sessionGate;
+      return {ok:true,json:async()=>({id:3})};
+    }
     if (url === '/api/sessions') return { ok: true, json: async () => ({sessions: [
       {id: 1, material_id: 'm1', title: 'course.md', created_at: '2026-11-09T10:00:00Z', ended: false},
       {id: 2, material_id: 'm2', title: 'other-course.md', created_at: '2026-11-08T10:00:00Z', ended: false},
@@ -62,13 +67,13 @@ async function setup(t, { draft, authenticated = true, openSession = true, faile
     if(url.endsWith('/memory/corrections')) {const body=JSON.parse(options.body);requests.push({path:url,...body});memorySnapshot={...memorySnapshot,revision:2,items:memorySnapshot.items.map(item=>({...item,effective_text:body.text}))};return {ok:true,json:async()=>memorySnapshot};}
     if(url==='/api/material-jobs') {
       await uploadGate;
+      operationReady = !failedUpload;
       return {ok:true,json:async()=>({id:'j1'})};
     }
     if(url==='/api/material-jobs/topic'){const body=JSON.parse(options.body);requests.push({path:url,...body});return {ok:true,json:async()=>({id:'j1'})};}
     if(url==='/api/material-jobs/j1/meaning'){requests.push({path:url,...JSON.parse(options.body)});operationReady=true;return {ok:true,json:async()=>({id:'j1'})};}
     if(url==='/api/operations/j1') return {ok:true,json:async()=>({id:'j1',kind:failedUpload?'upload':'topic',error:failedUpload?'The provider rejected graph preparation.':undefined,status:failedUpload?'failed':operationReady?'ready':'needs_clarification',result:operationReady?{id:'m1'}:{type:'choices',meanings:[{label:'Retrieval-augmented generation',description:'Grounding answers in documents.',query:'RAG AI'}]},
       events: (failedUpload ? ['reading', 'building_graph'] : ['interpreting_topic', 'searching', 'selected']).map((kind, i) => ({id:i+1, kind}))})};
-    if(url==='/api/operations/video1') return {ok:true,json:async()=>({id:'video1',kind:'video',status:'running',events:[{id:1,kind:'rendering'}]})};
     if(options?.method === 'PUT'){ const body=JSON.parse(options.body); requests.push(body); return {ok:true,json:async()=>({type:'plan',plan:body.plan,plan_version:body.expected_version+1})}; }
     if(url==='/api/materials/web'){const body=JSON.parse(options.body);requests.push({path:url,...body});return body.meaning
       ?{ok:false,status:400,json:async()=>({detail:'stop after choice'})}
@@ -184,16 +189,26 @@ test('annotations decorate exact Unicode-aware ranges and dismissal preserves st
   assert.equal(document.querySelector('.cm-line').textContent, workspace);
 });
 
-test('video visualization exposes native playback and chapter explanations', async t => {
+test('visualization shows a React Flow slideshow with step controls', async t => {
   const {document,dispatch}=await setup(t);
-  dispatch({type:'video_pending',operation_id:'video1',title:'Search trace'});
-  await until(()=>document.querySelector('.video-job')?.textContent.includes('Rendering the animation (Pillow / FFmpeg)'));
-  dispatch({type:'intervention',event_id:2,revision:1,result:{type:'visualization',content:'Find the lower bound.',metadata:{video:{title:'Search trace',url:'/api/videos/example',duration:15,chapters:[{start:0,end:15,text:'Keep searching for an earlier match.'}]}}}});
-  const player=await until(()=>document.querySelector('.video-player'));
-  assert.equal(player.querySelector('video').controls,true);
-  assert.match(player.querySelector('video').src,/api\/videos\/example/);
-  assert.match(player.textContent,/earlier match/);
-  assert.ok(player.querySelector('select'));
+  dispatch({type:'intervention',event_id:2,revision:1,result:{type:'visualization',content:'Find the lower bound.',
+    metadata:{visualization:{kind:'slideshow',title:'Search trace',nodes:[{id:'full',label:'Full interval'},{id:'left',label:'Earlier match'}],
+      edges:[{source:'full',target:'left'}],steps:[{explanation:'Start with the full interval.',active_nodes:['full']},
+        {explanation:'Keep searching for an earlier match.',active_nodes:['left']}]}}}});
+  const player=await until(()=>document.querySelector('.visual-player'));
+  const button = name => [...player.querySelectorAll('button')].find(item=>item.textContent===name);
+  assert.match(player.textContent,/Step 1 of 2/);
+  assert.match(player.querySelector('.flow-active').textContent,/Full interval/);
+  button('Next').click();
+  await until(()=>player.textContent.includes('Step 2 of 2'));
+  assert.match(player.querySelector('.flow-active').textContent,/Earlier match/);
+  button('Previous').click();
+  await until(()=>player.textContent.includes('Step 1 of 2'));
+  button('Play').click();
+  await until(()=>player.textContent.includes('Step 2 of 2'));
+  button('Restart').click();
+  await until(()=>player.textContent.includes('Step 1 of 2'));
+  assert.equal(player.querySelector('video'),null);
 });
 
 
@@ -383,6 +398,21 @@ test('new chat ignores saved preparation and shows only the upload step until th
   assert.match(document.querySelector('.preparation-panel').textContent,/Reading material \(Python\)/);
   assert.match(document.querySelector('.preparation-panel').textContent,/Building your learning map \(Knowledge Agent\)/);
   assert.match(document.querySelector('.preparation-panel').textContent,/provider rejected/);
+});
+
+test('an upload opens one chat while the automatic handoff is in progress', async t => {
+  const {promise:sessionGate,resolve:allowSession}=Promise.withResolvers();
+  const {document,window,requests}=await setup(t,{openSession:false,sessionGate});
+  const upload=document.querySelector('#upload');
+  Object.defineProperty(upload,'files',{value:[new window.File(['# Search'],'notes.md',{type:'text/markdown'})]});
+  upload.dispatchEvent(new window.Event('change',{bubbles:true}));
+  const opening=await until(()=>document.querySelector('.preparation-panel button:disabled'));
+  opening.click();
+  opening.click();
+  assert.deepEqual(requests.filter(request=>request.path==='/api/sessions'),[{path:'/api/sessions',preparation_id:'j1'}]);
+  allowSession();
+  await until(()=>document.querySelector('#submit:not(:disabled)'));
+  assert.equal(requests.filter(request=>request.path==='/api/sessions').length,1);
 });
 
 test('tutor progress shows completed and current steps alongside the conversation', async t => {

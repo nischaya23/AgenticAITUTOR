@@ -1,5 +1,6 @@
+import json
 from types import SimpleNamespace
-from backend import tools, planner, assessment, knowledge, reflection, hypothesis
+from backend import config, tools, planner, assessment, knowledge, reflection, hypothesis
 def tool_arguments(kind: str, context: dict) -> dict:
     concept = context['concept']
     content = {
@@ -19,9 +20,15 @@ def tool_arguments(kind: str, context: dict) -> dict:
                     issues=[dict(line=line, quote=quote, category='reconsider',
                                  reason='Try stating how this step preserves the search interval invariant.')])
     if kind == 'visualization':
-        args.update(title='Finding the first match',duration=2,
-            code="def draw_frame(canvas, t):\n    canvas.text(40, 40, 'Find the first match')\n    canvas.circle(100 + t * 30, 220, 20)",
-            chapters=[dict(start=0,end=2,text='Keep looking for an earlier match.')],source_ids=[])
+        slides = dict(kind='slideshow', title='Finding the first match',
+            nodes=[dict(id='full', label='Full interval'), dict(id='left', label='Earlier match')],
+            edges=[dict(source='full', target='left')],
+            steps=[dict(explanation='Start with the full interval.', active_nodes=['full']),
+                   dict(explanation='Keep looking for an earlier match.', active_nodes=['left'])])
+        if config.LLM_PROVIDER == 'gemini':
+            args['slideshow_json'] = json.dumps(slides)
+        else:
+            args['visualization'] = slides
     return args
 
 

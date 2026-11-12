@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import ActivityFlow, { type FlowStep, type StepDescription } from './ActivityFlow';
-import type { Operation, Video } from './types';
+import type { Operation } from './types';
 
 const reviewingSources = { label: 'Reviewing sources', actor: 'Research Agent' };
 const preparationLabels: Record<string, StepDescription> = {
@@ -14,11 +14,6 @@ const preparationLabels: Record<string, StepDescription> = {
   checking_evidence: { label: 'Checking evidence', actor: 'Knowledge Agent' },
 };
 
-const videoLabels: Record<string, StepDescription> = {
-  rendering: { label: 'Rendering the animation', actor: 'Pillow / FFmpeg' },
-  repairing: { label: 'Repairing the animation script', actor: 'Animation model' },
-  cache_hit: { label: 'Loading the saved animation', actor: 'Video renderer' },
-};
 
 async function request<T>(path: string, body?: object): Promise<T> {
   const response = await fetch(path, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined);
@@ -57,20 +52,33 @@ function useOperation(id: string | null) {
 }
 
 export function PreparationPanel({id,upload,onReady,onWaiting}: {
-  id: string | null; upload?: boolean; onReady: (materialId:string)=>Promise<void>; onWaiting?: ()=>void;
+  id: string | null; upload?: boolean; onReady: (materialId: string, preparationId: string)=>Promise<void>; onWaiting?: ()=>void;
 }) {
   const {state,error,reload}=useOperation(id);
   const opened=useRef('');
+  const opening = useRef(false);
+  const [openingStudy, setOpeningStudy] = useState(false);
   const [notice,setNotice]=useState('');
   const [acting,setActing]=useState(false);
   async function act(path:string,body:object={}) {
     setActing(true);setNotice('');
     try {await request(path,body);reload();} catch(e) {setNotice((e as Error).message);} finally {setActing(false);}
   }
+  async function openStudy() {
+    if (!id || !state?.result?.id || opening.current) return;
+    opening.current = true;
+    setOpeningStudy(true);
+    try {
+      await onReady(state.result.id, id);
+    } finally {
+      opening.current = false;
+      setOpeningStudy(false);
+    }
+  }
   useEffect(()=>{
     if(state && ['failed','interrupted','needs_clarification'].includes(state.status)) onWaiting?.();
     if (id && state?.status==='ready' && state.result?.id && opened.current!==id) {
-      opened.current=id; void onReady(state.result.id);
+      opened.current=id; void openStudy();
     }
   },[state,id,onReady]);
   const descriptions = [...new Set(state?.events.map(event => preparationLabels[event.kind]).filter(Boolean))];
@@ -95,42 +103,8 @@ export function PreparationPanel({id,upload,onReady,onWaiting}: {
     {(state?.status==='failed' || state?.status==='interrupted') && state.kind==='topic' && <button type="button" disabled={acting}
       onClick={()=>void act('/api/material-jobs/'+id+'/retry')}>Retry topic research</button>}
     {(state?.status==='failed' || state?.status==='interrupted') && state.kind==='upload' && <p>Choose your files again above to retry preparation.</p>}
-    {state?.status==='ready' && state.result?.id && <button type="button" onClick={()=>void onReady(state.result!.id!)}>Open study session</button>}
-  </section>;
-}
-
-export function VideoPlayer({video}: {video:Video}) {
-  const player=useRef<HTMLVideoElement>(null);
-  return <section className="video-player" aria-label={video.title}>
-    <h3>{video.title}</h3><video ref={player} controls preload="metadata" src={video.url} aria-label={video.title}><track kind="captions" src={video.url+'/captions'} srcLang="en" label="Explanation" default /></video>
-    <label>Playback speed <select defaultValue="1" onChange={event=>{if(player.current) player.current.playbackRate=Number(event.target.value);}}>
-      {[.5,1,1.5,2].map(speed=><option key={speed} value={speed}>{speed}×</option>)}</select></label>
-    <details><summary>Chapters and explanation</summary><ol>{video.chapters.map((chapter,i)=><li key={i}>
-      <button type="button" onClick={()=>{if(player.current) player.current.currentTime=chapter.start;}}>{chapter.start.toFixed(0)}s</button> {chapter.text}
-    </li>)}</ol></details>
-  </section>;
-}
-
-export function VideoJob({id,title}: {id:string;title:string}) {
-  const [currentId,setCurrentId]=useState(id);
-  const {state,error}=useOperation(currentId);
-  const [retryError,setRetryError]=useState('');
-  if(state?.status==='ready' && !state.result?.discarded) return null;
-  const stage = state?.events.filter(event => videoLabels[event.kind]).at(-1);
-  const discarded = state?.result?.discarded;
-  const paused = state?.status === 'failed' || state?.status === 'interrupted';
-  return <section className="video-job" aria-label="Animation progress"><strong>{title}</strong>{state?.content && <p>{state.content}</p>}
-    {discarded ? <p role="status">Animation discarded because your work changed.</p> : <>
-      <ActivityFlow label="Animation step" steps={[{
-        ...(stage ? videoLabels[stage.kind] : {label: 'Preparing your animation', actor: 'Video renderer'}),
-        id: stage?.kind ?? 'preparing', state: paused ? 'paused' : 'working',
-      }]} />
-      {paused && <p role="status">Video unavailable. Your written explanation is saved.</p>}
-    </>}
-    {(error || state?.error || retryError) && <p>{error || state?.error || retryError}</p>}
-    {paused && <button type="button" onClick={async()=>{
-      try {const next=await request<{operation_id:string}>('/api/operations/'+currentId+'/retry-video',{});setCurrentId(next.operation_id);}
-      catch(e){setRetryError((e as Error).message);}
-    }}>Retry animation</button>}
+    {state?.status==='ready' && state.result?.id && <button type="button" disabled={openingStudy} onClick={()=>void openStudy()}>
+      {openingStudy ? 'Opening study session…' : 'Open study session'}
+    </button>}
   </section>;
 }

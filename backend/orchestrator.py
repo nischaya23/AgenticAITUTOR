@@ -126,7 +126,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         row = db.get(Session, sid)
         state = deepcopy(row.state)
         if state['ended'] or (not explicit and (state['revision'] != job['revision']
-                or not observer_review.allowed(state) or state.get('assessment_pending') or state.get('pending_video'))):
+                or not observer_review.allowed(state) or state.get('assessment_pending'))):
             workflow.outcome('discarded', 'Question, response or context changed', db=db)
             utils.METRICS['stale_interventions'] += 1
             return None
@@ -157,9 +157,6 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
     selection = await planner.select_intervention(context, explicit,
         'explanation' if job.get('requested') == 'web_search' else job.get('requested'), scores=scores)
     result = await tutor.respond_to_student(context, selection)
-    if 'video_script' in result.get('metadata', {}):
-        from .features import queue_video
-        return await queue_video(job, result, context)
     result['metadata']['retrieved_sources'] = [dict(id=c['id'], source=c['source'], url=c.get('url')) for c in context['knowledge']]
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
@@ -170,7 +167,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
         context_changed = current.get('plan_version',0)!=context.get('plan_version',0) or model.get('memory_revision',0)!=context.get('snapshot',{}).get('memory_revision',model.get('memory_revision',0))
         if current['ended'] or changed_problem or (not explicit and
                 (current['revision'] != snapshot or not observer_review.allowed(current)
-                 or current.get('assessment_pending') or current.get('pending_video') or context_changed)):
+                 or current.get('assessment_pending') or context_changed)):
             workflow.outcome('discarded', 'Question, response or context changed', db=db)
             utils.METRICS['stale_interventions'] += 1
             return None

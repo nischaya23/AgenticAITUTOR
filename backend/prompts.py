@@ -12,13 +12,17 @@ def tutor_instructions(provider):
             'Hints give one clue, never the final answer. Guiding questions encourage independent '
             'reasoning. Highlight only exact uniquely identifiable text on a single workspace line; '
             'give 1-based line numbers, category and reason, never offsets. Empty issues are valid. '
-            'For visualization generate a short educational Python animation using the supplied '
-            'canvas API and instructions. Follow the selected learning objective.') + PLAN_GUIDANCE
+            'Follow the selected learning objective.') + PLAN_GUIDANCE
 
 
-VISUALIZATION_REPAIR = (
-    'Return a corrected visualization tool call. Fix these validation issues.'
+VISUALIZATION_SLIDES = (
+    ' Build a short educational React Flow slideshow for the current topic. Use one graph with '
+    'kind "slideshow", title, nodes [{id, label}], edges [{source, target}], and steps '
+    '[{explanation, active_nodes}]. Use 2–12 slides with concise explanations and highlight '
+    'the nodes relevant to each slide. Reuse the same unique node IDs across steps and edges. '
+    'Represent the actual process, structure, or relationships in the topic with short node labels.'
 )
+VISUALIZATION_GEMINI = ' Encode that graph as a JSON string in slideshow_json, without Markdown fences.'
 
 ASSESS_ANSWER = (
     (
@@ -103,7 +107,7 @@ def tool_description(name):
 
 TOOL_DESCRIPTIONS = {
     'highlight': 'Annotate exact workspace excerpts with their 1-based line and category.',
-    'visualization': 'Animate any topic as a general 2D scene, or use a specialized search or graph view when it fits.',
+    'visualization': 'Show a topic as an interactive graph slideshow with a sequence of explained steps.',
 }
 
 CONTEXT_TRUNCATED = "\n[Context truncated to input budget.]"

@@ -36,6 +36,7 @@ async def test_gemini_research_roundtrip_preserves_thought_signature(monkeypatch
 
 def test_selected_sources_survive_followup_rejection_and_upload_builds_graph(app_env,monkeypatch):
     client,_,_=app_env
+    monkeypatch.setattr(config, 'WEB_SEARCH_ON_UPLOAD', True)
     original=utils.call_llm
     count=0
     async def model(instructions,data,**kwargs):

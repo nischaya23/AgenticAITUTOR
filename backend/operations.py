@@ -83,7 +83,7 @@ def spawn(factory, operation_id, work):
     parent = workflow.CURRENT.get()
     with factory() as db:
         operation = db.get(Operation, operation_id)
-    trace = workflow.create_run(operation.user_id, 'Visualization' if operation.kind == 'video' else 'Topic/upload preparation',
+    trace = workflow.create_run(operation.user_id, 'Topic/upload preparation',
         session_id=operation.data.get('session_id'), operation_id=operation_id,
         trigger={'parent_run_id': parent.run_id if parent else None, 'retry_of': operation.data.get('retry_of')})
     async def run():

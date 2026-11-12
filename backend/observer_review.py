@@ -76,7 +76,7 @@ class ReviewScheduler:
         task.add_done_callback(finished)
 
     def blocked(self, sid, state):
-        return state.get('assessment_pending') or state.get('pending_video') or self.busy(sid)
+        return state.get('assessment_pending') or self.busy(sid)
 
     def due_reviews(self, sid, state, now):
         pending = self.pending[sid]

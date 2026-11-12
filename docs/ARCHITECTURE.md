@@ -15,9 +15,9 @@
 11. **Analyze the draft.** The Hypothesis agent reviews a stable draft after an eight-second pause, at most once every thirty seconds. Draft hypotheses are tentative session state, not long-term mastery updates.
 12. **Decide whether to help.** The Observer LLM decides WAIT or WAKE after an edit pause, inactivity, or an incorrect assessment. Routine reviews are spaced thirty seconds apart by default. The UI shows the Observer's step and decision reason.
 13. **Choose and deliver help.** After WAKE or a chat request, the Planner uses the current question's delivered-tool counts and the learning context to choose a tool. The Tutor produces a hint, explanation, text highlight, guiding question, or visualization brief. Students who name a tool get that tool.
-14. **Render a visualization locally.** The visualization path generates a Python drawing script, chapters and a written explanation. A bounded interpreter evaluates the permitted Python drawing subset; generated code is never passed to `eval` or `exec`. A local worker renders Pillow frames and encodes H.264 MP4 through FFmpeg. No Docker is used. Rendering releases the teaching lock and publishes progress. Stale automatic results are discarded before delivery.
+14. **Show a visualization.** The Tutor generates graph nodes, edges, and slides. Python validates the references, and React Flow highlights the relevant nodes as the student advances through each slide.
 15. **Assess and reflect.** The Assessment agent grades an immutable submitted text snapshot using the private rubric, reference and sources. Reflection saves a short learning summary and next goal. Hypothesis analysis combines the submission, assessment, reflection and prior evidence. Correct answers advance the study; incorrect answers retain the question.
-16. **Inspect or correct memory, then continue or end.** The Memory tab displays session context, long-term mastery/goals/summaries and possible misconceptions. Corrections retain original evidence and history. End session stops pending reviews and video delivery and preserves saved work.
+16. **Inspect or correct memory, then continue or end.** The Memory tab displays session context, long-term mastery/goals/summaries and possible misconceptions. Corrections retain original evidence and history. End session stops pending reviews and preserves saved work.
 
 ## Shared context
 
@@ -27,14 +27,13 @@
 - **Planner:** graph, sources, eligible concepts, plan, goals, mastery and recent outcomes.
 - **Question Generator:** concept, eligible prerequisites, plan, recent questions, sources and diagnostic hypotheses.
 - **Observer LLM:** current work, activity, recent help, assessment evidence, and learning memory.
-- **Tutor/Visualization:** selected pedagogical strategy or visual brief, current work, relevant memory and evidence.
+- **Tutor/Visualization:** selected pedagogical strategy, current work, relevant memory and evidence.
 - **Assessment:** submitted snapshot plus private answer/rubric, learning context and sources.
 - **Reflection/Hypothesis:** response, assessment, prior teaching, learning memory and evidence references.
-- **Renderer:** script and render settings only; no model credentials or student memory.
 
 ## Memory and scores
 
-Session memory lives in `sessions.state`. Long-term student memory lives in `student_state.data`. `memory_items` gives editable summaries, goals and misconceptions stable IDs, provenance and correction history. Events remain append-only. Preparation and video status live in `operations` and `operation_events`.
+Session memory lives in `sessions.state`. Long-term student memory lives in `student_state.data`. `memory_items` gives editable summaries, goals and misconceptions stable IDs, provenance and correction history. Events remain append-only. Preparation status and its associated chat live in `operations` and `operation_events`.
 
 Students can correct summaries and goals and dispute misconceptions. Grades, mastery, and history are read-only. Corrections use a memory revision to reject stale saves. Student goals survive later agent-generated goal updates.
 
@@ -43,12 +42,6 @@ Assessment scores are provisional LLM judgments between zero and one. Mastery us
 The Planner scores eligible tools as `1 / (1 + successful deliveries on the current question)`. A delivered hint removes hints from automatic selection until the next question. Explicit tool choices are honored.
 
 The Observer waits for in-flight work and discards decisions when the reviewed state changes. If the model fails, the student continues working.
-
-## Local video contract
-
-The model writes `def draw_frame(canvas, t):` using assignments, bounded loops, conditions, arithmetic, approved math calls and drawing helpers. Collections, numeric ranges and per-frame instructions are limited. Arbitrary imports, file/network access, classes, comprehensions and object introspection are unsupported.
-
-Default output is 960×540 at 15 fps, around fifteen seconds and at most thirty seconds. The local worker has time, memory and file-size limits. An account-scoped content cache avoids rerendering identical scripts. Captions, seekable playback, chapters and a written explanation accompany the video. Linux/POSIX resource limits are used by the worker.
 
 ## Architecture
 
@@ -69,11 +62,10 @@ flowchart TD
     Review -->|WAKE| Selection[Planner: tool scoring and teaching strategy]
     Selection --> Tutor[Tutor]
     Tutor -. research .-> Search
-    Tutor --> Visual[Visualization script when selected]
-    Visual --> Render[Local bounded interpreter and FFmpeg]
-    Render --> Video[Video, captions and explanation]
+    Tutor --> Visual[Validated graph and slides]
+    Visual --> Slides[Interactive React Flow slideshow]
     Tutor --> Text[Text teaching tools]
-    Video --> Work
+    Slides --> Work
     Text --> Work
     Work -->|Submit| Grade[Assessment]
     Grade -->|Incorrect| Triggers

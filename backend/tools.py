@@ -7,7 +7,7 @@ from openai import pydantic_function_tool
 from pydantic import Field
 from . import workflow, prompts, config, knowledge, utils
 from .logging_setup import event as log_event
-from .video import VideoScript
+from .visualization import GeminiVisualizationRequest, Slideshow, VisualizationRequest
 
 class TextArgs(utils.Schema):
     content: str = Field(min_length=1, max_length=12000)
@@ -56,15 +56,21 @@ def highlight(context: dict) -> dict:
         raise ValueError('Highlight end must follow start.')
     return ToolResult(type='highlight', content=args.content, metadata=args.model_dump(exclude={'content'})).model_dump()
 
-def visualization(context: dict) -> dict:
-    return interactive_visualization(context)
+def interactive_visualization(arguments: str | dict, *, gemini: bool = False) -> dict:
+    schema = GeminiVisualizationRequest if gemini else VisualizationRequest
+    args = schema.model_validate_json(arguments) if isinstance(arguments, str) else schema.model_validate(arguments)
+    slides = Slideshow.model_validate_json(args.slideshow_json) if isinstance(args, GeminiVisualizationRequest) else args.visualization
+    return ToolResult(type='visualization', content=args.content,
+                      metadata={'concept': args.concept, 'visualization': slides.model_dump()}).model_dump()
 
 REGISTRY = {'hint': (TextArgs, hint), 'explanation': (TextArgs, explanation),
-    'highlight': (HighlightArgs, highlight), 'visualization': (VideoScript, visualization),
+    'highlight': (HighlightArgs, highlight), 'visualization': (VisualizationRequest, interactive_visualization),
     'guiding_question': (TextArgs, guiding_question)}
 
 def function_definition(name: str) -> dict:
-    schema = {'highlight': ReasoningReviewArgs, 'visualization': VideoScript}.get(name, REGISTRY[name][0])
+    schema = {'highlight': ReasoningReviewArgs}.get(name, REGISTRY[name][0])
+    if name == 'visualization' and config.LLM_PROVIDER == 'gemini':
+        schema = GeminiVisualizationRequest
     definition = pydantic_function_tool(schema, name=name, description=prompts.TOOL_DESCRIPTIONS.get(name, prompts.tool_description(name)))['function']
     return {'type': 'function', **definition}
 
@@ -74,7 +80,7 @@ async def invoke_registered_tool(name: str, arguments: str | dict, context: dict
         raise ValueError('Unknown intervention tool.')
     if context is not None and name == 'highlight':
         return reasoning_review(arguments, context)
-    if context is not None and name == 'visualization':
+    if name == 'visualization':
         return interactive_visualization(arguments, gemini=config.LLM_PROVIDER == 'gemini')
     schema, function = REGISTRY[name]
     args = schema.model_validate_json(arguments) if isinstance(arguments, str) else schema.model_validate(arguments)
@@ -129,10 +135,6 @@ def reasoning_review(arguments: str | dict, context: dict) -> dict:
     result = ToolResult(type='highlight', content=args.content, metadata=dict(concept=args.concept,
         target='workspace', source_id='workspace', annotations=annotations)).model_dump()
     return validate_target(result, context)
-
-def interactive_visualization(arguments: str | dict, *, gemini: bool=False) -> dict:
-    args = VideoScript.model_validate_json(arguments) if isinstance(arguments, str) else VideoScript.model_validate(arguments)
-    return ToolResult(type='visualization', content=args.content, metadata={'concept': args.concept, 'video_script': args.model_dump()}).model_dump()
 
 def retrieve_knowledge(query: str, material_id: str | None=None, user_id: int | None=None) -> list[dict]:
     return knowledge.retrieve_knowledge(query, material_id=material_id, user_id=user_id)

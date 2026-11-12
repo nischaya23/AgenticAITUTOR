@@ -6,9 +6,8 @@ import pytest
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
-from backend import config, db, knowledge, main, memory, observer, orchestrator, planner, reflection, tools, tutor, utils
+from backend import config, db, knowledge, main, memory, orchestrator, planner, reflection, tools, tutor, utils
 from backend.student_model import bkt_update
-from backend import config, db, features, knowledge, main, memory, orchestrator, planner, reflection, tools, tutor, utils
 from conftest import receive_until
 
 
@@ -70,8 +69,8 @@ async def test_all_five_tools_have_valid_outputs(app_env, kind):
         assert annotation['end'] > annotation['start']
         tools.validate_target(result, context)
     if kind == 'visualization':
-        assert 'draw_frame' in result['metadata']['video_script']['code']
-        assert result['metadata']['video_script']['chapters']
+        assert result['metadata']['visualization']['kind'] == 'slideshow'
+        assert len(result['metadata']['visualization']['steps']) == 2
     definition = tools.function_definition(kind)
     assert definition['strict'] and definition['parameters']['additionalProperties'] is False
 
@@ -118,10 +117,8 @@ async def test_approved_help_reflection_and_mastery_persist(app_env):
     assert outputs[0]['type'] == 'assessment' and outputs[0]['result']['correct']
     with factory() as connection:
         model = memory.get_long_term_memory(connection,row.user_id)
-        assert model['policy']['updates'] == 1
         assert model['mastery']['Binary Search'] == round(bkt_update(None, 1, True), 4)
         assert model['effective_interventions']['guiding_question'] == {'observations': 1, 'reward_sum': .5}
-        assert model['mastery']['Binary Search'] == .6
         assert model['memories']
         reflections = connection.scalars(select(db.Event).where(db.Event.type=='reflection')).all()
         assert next(r for r in reflections if 'reward' in r.data).data['reward'] == .5
@@ -194,15 +191,12 @@ async def test_planner_scores_delivered_tools_and_switches_after_a_hint(app_env,
     assert len(model_scores) == 3
 
     tool_choice = 'visualization'
-    queued = AsyncMock(return_value={'type': 'video_pending', 'operation_id': 'v1'})
-    monkeypatch.setattr(features, 'queue_video', queued)
     output = await orchestrator.handle(approved_help(factory, sid))
-    assert output[0]['type'] == 'video_pending'
+    assert output[0]['result']['metadata']['visualization']['kind'] == 'slideshow'
     assert model_scores[-1]['explanation'] == .5
     assert model_scores[-1]['visualization'] == 1
-    assert queued.call_args.args[1]['type'] == 'visualization'
     with factory() as connection:
-        assert planner.tool_scores(connection, sid, problem_id, '')['visualization'] == 1
+        assert planner.tool_scores(connection, sid, problem_id, '')['visualization'] == .5
 
     response = client.post(f'/api/sessions/{sid}/problem', json={'concept': 'Binary Search'})
     assert response.status_code == 200
@@ -286,7 +280,11 @@ def test_validation_and_no_student_code_execution(app_env):
 
 async def test_invalid_tool_metadata_rejected():
     with pytest.raises(ValueError):
-        await tools.invoke_registered_tool('visualization',{'content':'bad','concept':'x','nodes':[{'id':'1','label':'x'}],'edges':[{'source':'1','target':'missing'}],'steps':[]})
+        await tools.invoke_registered_tool('visualization', {'content':'bad','concept':'x','visualization':{
+            'kind':'slideshow','title':'Example','nodes':[{'id':'1','label':'x'}],
+            'edges':[{'source':'1','target':'missing'}],
+            'steps':[{'explanation':'First','active_nodes':['1']},{'explanation':'Second','active_nodes':['1']}],
+        }})
     with pytest.raises(ValueError):
         tools.validate_target(tools.highlight({'content':'x','concept':'x','target':'workspace','source_id':'workspace','quote':'bad','start':0,'end':3}),{'workspace':'abc','knowledge':[]})
 

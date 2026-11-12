@@ -1,12 +1,12 @@
 # Studyroom — Agentic AI Tutor
 
-Describe what you want to learn or upload course notes. Studyroom researches the subject, explains which websites it selects, builds a sourced knowledge graph, and tutors you through text questions. Learning memory is visible and correctable. Visual explanations are generated drawing scripts rendered locally into video.
+Describe what you want to learn or upload course notes. Studyroom researches the subject, explains which websites it selects, builds a sourced knowledge graph, and tutors you through text questions. Learning memory is visible and correctable. Visual explanations are interactive React Flow slideshows.
 
 The application uses FastAPI, React/TypeScript, SQLite, and the configured OpenAI or Gemini provider. Agents are cooperating Python modules; no external agent framework is required.
 
 ## Run
 
-Use Python 3.11+ and Node.js 20.19+ or 22.12+. Pillow and a bundled FFmpeg binary are included in the Python requirements for local video rendering; no system FFmpeg install or DejaVu font is required. POSIX resource limits are applied where supported. Docker is not used.
+Use Python 3.11+ and Node.js 20.19+ or 22.12+.
 
 ```bash
 python -m venv .venv
@@ -30,7 +30,7 @@ Or set `LLM_PROVIDER=gemini`, `GEMINI_API_KEY` and `GEMINI_MODEL`. Use a model y
 
 Open http://127.0.0.1:8000. For development, keep FastAPI running and use `npm run dev`, then open http://127.0.0.1:5173. Vite proxies `/api` and `/ws`.
 
-Create an email/password account. Accounts own their materials, sessions, operations, learning memory and rendered videos. Passwords use scrypt; revocable login cookies are HttpOnly. Set `COOKIE_SECURE=true` for HTTPS and configure `CORS_ORIGINS` for additional development origins.
+Create an email/password account. Accounts own their materials, sessions, operations and learning memory. Passwords use scrypt; revocable login cookies are HttpOnly. Set `COOKIE_SECURE=true` for HTTPS and configure `CORS_ORIGINS` for additional development origins.
 
 ## Study and memory
 
@@ -39,9 +39,9 @@ Create an email/password account. Accounts own their materials, sessions, operat
 - Research progress shows queries, candidate pages, selection/rejection reasons and supporting quotations. Accepted evidence is retained if a later research request fails.
 - The learning map shows concepts, prerequisites and evidence. Click an unlocked concept to focus on it.
 - Questions and student responses are text-only. Saved legacy diagrams are not editable; active diagram questions are replaced on resume without mastery credit.
-- Request hints, explanations, text review, guiding questions, videos or web search. Automatic help can be disabled in the workspace.
+- Request hints, explanations, text review, guiding questions, visualizations or web search. Automatic help can be disabled in the workspace.
 - The Memory tab shows session context, long-term mastery, goals, reflections, hypotheses and misconceptions. Correct summaries/goals or dispute misconceptions without changing grades or deleting evidence.
-- New visualizations use local Pillow frames and FFmpeg MP4 encoding, with captions and chapters. The renderer interprets a bounded Python drawing subset rather than executing unrestricted model code.
+- Visualizations show a graph with highlighted nodes, step explanations, and playback controls.
 
 See [the complete numbered agent flow and architecture](docs/ARCHITECTURE.md).
 
@@ -77,7 +77,7 @@ Fetched content is untrusted data. Private/loopback addresses and unsafe redirec
 
 ## Persistence and APIs
 
-SQLite stores account/session state, append-only events, student memory, editable memory entries and preparation/video operations. Original material and retrieval chunks live under `data/materials`; account-scoped videos and scripts live under `data/videos`. Summaries retain the latest thirty entries. The app adds new tables on startup and preserves existing saved material and event history.
+SQLite stores account/session state, append-only events, student memory, editable memory entries and preparation operations. Original material and retrieval chunks live under `data/materials`. Summaries retain the latest thirty entries. The app adds new tables on startup and preserves existing saved material and event history.
 
 Important endpoints:
 
@@ -86,7 +86,7 @@ Important endpoints:
 - `GET /api/operations/{id}` and `/events` — owned progress snapshots and resumable SSE.
 - `POST /api/material-jobs/{id}/meaning` and `/retry` — clarify or retry a topic.
 - `GET /api/sessions/{id}/memory` and `POST .../memory/corrections` — memory display and versioned corrections.
-- `GET /api/videos/{key}` and `/captions` — owned, seekable video and captions.
+- `POST /api/sessions` with `preparation_id` — create or reopen the chat for a completed preparation.
 - Existing session, material, student, study and `/ws/{id}` routes remain available. Schemas are at `/docs`.
 
 Run one Uvicorn worker: task queues and locks live in the process. Refreshing restores saved work and operation progress. Interrupted preparation jobs can be retried; unfinished model calls are not replayed. No student-submitted code is executed.
@@ -98,6 +98,6 @@ python -m pytest -q
 npm test
 ```
 
-The ordinary suite mocks providers and search. It includes a local FFmpeg renderer integration check when FFmpeg is installed. Optional browser and paid model tests use their existing `RUN_BROWSER_TESTS` and `RUN_OPENAI_INTEGRATION` flags. See [executed validation](TEST_RESULTS.md) for the exact commands and any local legacy-test exclusions.
+The ordinary suite mocks providers and search. Optional browser and paid model tests use the `RUN_BROWSER_TESTS` and `RUN_OPENAI_INTEGRATION` flags.
 
-All model-facing instructions are in `backend/prompts.py` and the specialized research/Observer/video modules. Restart the backend after changing code or configuration. Logs are JSON lines under `tmp/logs`; do not publish them because model request logs contain student context.
+Model-facing instructions live in `backend/prompts.py` and the specialized research and Observer modules. Restart the backend after changing code or configuration. Logs are JSON lines under `tmp/logs`; do not publish them because model request logs contain student context.

@@ -28,4 +28,4 @@ async def test_live_teaching_function(monkeypatch, kind):
                    knowledge=[], query='Review the update and illustrate the lower-bound binary search.')
     result = await tutor.execute_intervention({'action': kind, 'strategy': 'Show the interval invariant.'}, context)
     assert result['type'] == kind
-    assert ('annotations' if kind == 'highlight' else 'video_script') in result['metadata']
+    assert ('annotations' if kind == 'highlight' else 'visualization') in result['metadata']

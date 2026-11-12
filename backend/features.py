@@ -1,16 +1,14 @@
-"""Memory controls, preparation jobs and video artifacts."""
+"""Memory controls and preparation jobs."""
 import asyncio
-import re
 from pathlib import Path
 from typing import Literal
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse, FileResponse, Response
+from fastapi.responses import StreamingResponse
 from pydantic import Field, field_validator
-from . import workflow, utils, memory, context, knowledge, research, websearch, operations, video
-from .db import Session, Operation, append_event
+from . import utils, memory, context, knowledge, research, websearch, operations
+from .db import Operation
 
 router = APIRouter()
-VIDEO_TASKS = {}
 
 class Correction(utils.Schema):
     expected_revision: int = Field(ge=0)
@@ -160,123 +158,3 @@ async def retry_topic(request: Request,oid: str):
         uid=row.user_id; description=row.data['description']; row.status='running'
     operations.spawn(SessionLocal,oid,lambda:prepare_topic(uid,description))
     return dict(id=oid)
-
-
-@router.get('/api/videos/{key}')
-def serve_video(request: Request,key: str):
-    from .main import SessionLocal
-    if not re.fullmatch('[a-f0-9]{64}',key): raise HTTPException(404,'Video not found.')
-    path=video.directory(request.state.user_id)/key/'video.mp4'
-    if not path.is_file(): raise HTTPException(404,'Video not found.')
-    return FileResponse(path,media_type='video/mp4')
-
-
-def cancel_videos(sid):
-    for task in list(VIDEO_TASKS.get(sid,())): task.cancel()
-
-
-async def queue_video(job,result,learning_context):
-    from .main import SessionLocal,broadcast,memory_changed
-    sid=job['session_id']
-    spec=video.VideoScript.model_validate(result['metadata'].pop('video_script'))
-    ids={p['id'] for p in learning_context.get('knowledge',[])} | {p['id'] for p in learning_context.get('graph_sources',[])}
-    if any(ref not in ids for ref in spec.source_ids): raise ValueError('Video must cite supplied sources.')
-    with SessionLocal.begin() as db:
-        row=db.get(Session,sid); uid=row.user_id
-        state=memory.get_short_term_memory(db,sid)
-        if state.get('ended') or state.get('current_problem',{}).get('id')!=job['problem'].get('id'):
-            return None
-        if not job['explicit'] and (state['revision']!=job['revision'] or not state.get('proactive_enabled',True)):
-            return None
-        if not state.get('plan',{}).get('steps'):
-            state['plan']=learning_context['plan']; state['plan_version']=state.get('plan_version',0)+1
-        expected_plan=state.get('plan_version',0)
-        memory.update_short_term_memory(db,sid,state)
-    oid=operations.create(SessionLocal,uid,'video',dict(session_id=sid,title=spec.title,content=spec.content,retry_of=job.get('retry_operation_id'),
-        retry_data=dict(job=job,spec=spec.model_dump(),context=learning_context)))
-    with SessionLocal.begin() as db:
-        memory.update_short_term_memory(db,sid,{'pending_video':oid,'last_video_operation':oid})
-    async def work():
-        nonlocal spec
-        started=utils.now()
-        for attempt in range(2):
-            try:
-                key=await video.render(spec,uid)
-                break
-            except ValueError as exc:
-                if attempt or 'unavailable' in str(exc).lower() or 'setup' in str(exc).lower(): raise
-                await operations.progress('repairing',message='Repairing the animation script.')
-                spec=await utils.call_llm(video.SCRIPT_INSTRUCTIONS,
-                    dict(context=learning_context,previous=spec.model_dump(),error=str(exc)),
-                    schema=video.VideoScript,operation='REPAIR_VIDEO',max_output_tokens=6000)
-        payload=dict(url=f'/api/videos/{key}',title=spec.title,chapters=[c.model_dump() for c in spec.chapters],
-            duration=spec.duration,render_seconds=round(utils.now()-started,2))
-        if any(ref not in ids for ref in spec.source_ids): raise ValueError('Repaired animation cited an unknown source.')
-        with SessionLocal.begin() as db:
-            state=memory.get_short_term_memory(db,sid)
-            changed=state.get('current_problem',{}).get('id')!=job['problem'].get('id')
-            student=memory.get_long_term_memory(db,uid)
-            memory_changed_since=student.get('memory_revision',0)!=learning_context.get('snapshot',{}).get('memory_revision',student.get('memory_revision',0))
-            stale=state.get('plan_version',0)!=expected_plan or (not job['explicit'] and (state['revision']!=job['revision'] or not state.get('proactive_enabled') or memory_changed_since))
-            if state.get('ended') or changed or stale or state.get('pending_video')!=oid:
-                await operations.progress('discarded',message='The question or response changed; this animation was not delivered.')
-                return dict(discarded=True)
-            final=dict(type='visualization',content=spec.content,metadata=dict(concept=spec.concept,video=payload,source_ids=spec.source_ids,
-                retrieved_sources=[dict(id=p['id'],source=p['source'],url=p.get('url')) for p in learning_context['knowledge']]))
-            event=append_event(db,sid,'intervention',dict(**final,trigger_event_id=job['event_id'],
-                proactive=not job['explicit'],problem_id=state['current_problem']['id']))
-            o=state['observer']
-            old=o.pop('pending_intervention',None)
-            if old: append_event(db,sid,'intervention_closed',dict(intervention_id=old.get('event_id'),reward=None,evidence='Superseded by delivered video.'))
-            o['last_intervention_at']=utils.now()
-            if not job['explicit']:
-                o['pending_intervention']=dict(action='WAKE',event_id=event.id,tool='visualization',at=utils.now())
-            memory.update_short_term_memory(db,sid,{**state,'pending_video':None})
-            delivered=dict(type='intervention',event_id=event.id,proactive=not job['explicit'],result=final,revision=state['revision'])
-        delivered['workflow_run_id'] = workflow.CURRENT.get().run_id if workflow.CURRENT.get() else None
-        await broadcast(sid,delivered)
-        workflow.record('delivery.video', event_id=event.id)
-        await memory_changed(sid)
-        return payload
-    async def guarded():
-        try: return await work()
-        finally:
-            with SessionLocal.begin() as db:
-                state=memory.get_short_term_memory(db,sid)
-                if state.get('pending_video')==oid: memory.update_short_term_memory(db,sid,{'pending_video':None})
-    task=operations.spawn(SessionLocal,oid,guarded)
-    VIDEO_TASKS.setdefault(sid,set()).add(task)
-    task.add_done_callback(VIDEO_TASKS[sid].discard)
-    return dict(type='video_pending',operation_id=oid,title=spec.title)
-
-
-@router.post('/api/operations/{oid}/retry-video',status_code=202)
-async def retry_video(request: Request,oid: str):
-    from .main import SessionLocal
-    data=operations.snapshot(SessionLocal,oid,request.state.user_id)
-    if not data or data['kind']!='video': raise HTTPException(404,'Animation not found.')
-    if data['status'] not in ('failed','interrupted'): raise HTTPException(409,'Animation is already running or complete.')
-    with SessionLocal() as db:
-        saved=db.get(Operation,oid).data['retry_data']
-    job={**saved['job'],'retry_operation_id':oid};sid=job['session_id']
-    with SessionLocal() as db:
-        row=db.get(Session,sid)
-        if row.user_id!=request.state.user_id or row.state.get('ended') or row.state.get('current_problem',{}).get('id')!=job['problem'].get('id'):
-            raise HTTPException(409,'The question changed. Request a new visualization instead.')
-    return await queue_video(job,dict(type='visualization',metadata=dict(video_script=saved['spec'])),saved['context'])
-
-
-@router.get('/api/videos/{key}/captions')
-def video_captions(request: Request,key: str):
-    if not re.fullmatch('[a-f0-9]{64}',key): raise HTTPException(404,'Video not found.')
-    folder=video.directory(request.state.user_id)/key
-    if not (folder/'video.mp4').is_file(): raise HTTPException(404,'Video not found.')
-    import json
-    chapters=json.loads((folder/'script.json').read_text())['chapters']
-    def stamp(seconds):
-        ms=round(seconds*1000)
-        return f'{ms//3600000:02}:{ms//60000%60:02}:{ms//1000%60:02}.{ms%1000:03}'
-    cues=['WEBVTT','']
-    for chapter in chapters:
-        cues.extend([f"{stamp(chapter['start'])} --> {stamp(chapter['end'])}",chapter['text'].replace('-->','—'), ''])
-    return Response('\n'.join(cues),media_type='text/vtt')
