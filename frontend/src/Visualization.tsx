@@ -1,10 +1,52 @@
 import { useEffect, useState } from 'react';
-import { Background, Controls, MarkerType, ReactFlow, type NodeChange } from '@xyflow/react';
+import { Background, Controls, getViewportForBounds, MarkerType, ReactFlow, useNodesInitialized, useReactFlow, type NodeChange } from '@xyflow/react';
 import { useReducedMotion } from 'motion/react';
 import type { Graph, GraphVisualization, Visit } from './types';
 import { useTheme } from './Theme';
 import '@xyflow/react/dist/style.css';
 
+const fitOptions = { padding: 0.22 };
+const nodeWidth = 170;
+const minZoom = 0.04;
+const maxZoom = 2;
+type NodeLayout = { position?: { x: number; y: number }; measured?: { width: number; height: number } };
+
+function FitVisibleGraph({ canvas }: { canvas: HTMLDivElement | null }) {
+  const nodesInitialized = useNodesInitialized();
+  const { getNodes, getNodesBounds, setViewport, viewportInitialized } = useReactFlow();
+
+  useEffect(() => {
+    if (!canvas || !viewportInitialized) return;
+    let frame = 0;
+    let previousSize = '';
+    const scheduleFit = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const { clientWidth, clientHeight } = canvas;
+        if (!clientWidth || !clientHeight) {
+          previousSize = '';
+          return;
+        }
+        const size = clientWidth + 'x' + clientHeight;
+        if (size === previousSize) return;
+        const nodes = getNodes();
+        if (!nodes.length) return;
+        previousSize = size;
+        const bounds = getNodesBounds(nodes.map(node => node.id));
+        void setViewport(getViewportForBounds(bounds, clientWidth, clientHeight, minZoom, maxZoom, fitOptions.padding));
+      });
+    };
+    const observer = new ResizeObserver(scheduleFit);
+    observer.observe(canvas);
+    scheduleFit();
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [canvas, getNodes, getNodesBounds, nodesInitialized, setViewport, viewportInitialized]);
+
+  return null;
+}
 
 function graphPositions(graph: Graph, visits?: Visit[]) {
   const levels = new Map(graph.nodes.map(node => [node.id, 0]));
@@ -36,7 +78,8 @@ export function FlowGraph({ graph, visits, step = 0, activeNodes, masteryTarget,
   activeNodes?: string[];
   onSelect?: (concept: string) => void;
 }) {
-  const [moved, setMoved] = useState(new Map<string, { x: number; y: number }>());
+  const [canvas, setCanvas] = useState<HTMLDivElement | null>(null);
+  const [layout, setLayout] = useState(new Map<string, NodeLayout>());
   const { theme } = useTheme();
   const reducedMotion = useReducedMotion();
   const positions = graphPositions(graph, visits);
@@ -46,7 +89,10 @@ export function FlowGraph({ graph, visits, step = 0, activeNodes, masteryTarget,
   const selectable = (node: Graph['nodes'][number]) => Boolean(onSelect && node.available && !node.active);
   const nodes = graph.nodes.map(node => ({
     id: node.id,
-    position: moved.get(node.id) ?? positions.get(node.id)!,
+    initialWidth: nodeWidth,
+    initialHeight: 48,
+    position: layout.get(node.id)?.position ?? positions.get(node.id)!,
+    measured: layout.get(node.id)?.measured,
     data: { label: <><strong>{node.label}</strong>
       {masteryTarget !== undefined && <small>{node.mastery == null ? 'Not assessed yet'
         : 'Estimated mastery: ' + Math.round(node.mastery * 100) + '%'}</small>}
@@ -62,21 +108,30 @@ export function FlowGraph({ graph, visits, step = 0, activeNodes, masteryTarget,
       markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: active ? (theme === 'dark' ? '#d0e9a3' : '#365c37') : '#7d9387', strokeWidth: active ? 3 : 1.5 } };
   });
 
-  function moveNodes(changes: NodeChange[]) {
-    const moves = changes.filter(change => change.type === 'position' && change.position);
-    if (!moves.length) return;
-    setMoved(previous => {
+  function updateLayout(changes: NodeChange[]) {
+    const updates = changes.filter(change => (change.type === 'position' && change.position)
+      || (change.type === 'dimensions' && change.dimensions));
+    if (!updates.length) return;
+    setLayout(previous => {
       const next = new Map(previous);
-      for (const move of moves) if (move.type === 'position' && move.position) next.set(move.id, move.position);
+      for (const change of updates) {
+        if (change.type === 'position' && change.position) {
+          next.set(change.id, { ...next.get(change.id), position: change.position });
+        } else if (change.type === 'dimensions' && change.dimensions) {
+          next.set(change.id, { ...next.get(change.id), measured: change.dimensions });
+        }
+      }
       return next;
     });
   }
 
-  return <div className="flow" aria-label={label}>
-    <ReactFlow colorMode={theme} nodes={nodes} edges={edges} onNodesChange={moveNodes} fitView
+  return <div className="flow" ref={setCanvas} aria-label={label}>
+    <ReactFlow colorMode={theme} nodes={nodes} edges={edges} onNodesChange={updateLayout}
+      defaultViewport={{ x: 12, y: 12, zoom: 0.8 }}
       onNodeClick={(_, clicked) => { const node = graph.nodes.find(n => n.id === clicked.id); if (node && selectable(node)) onSelect!(node.id); }}
-      fitViewOptions={{ padding: 0.22 }} minZoom={0.12} nodesConnectable={false} deleteKeyCode={null}>
+      fitViewOptions={fitOptions} minZoom={minZoom} maxZoom={maxZoom} nodesConnectable={false} deleteKeyCode={null}>
       <Background /><Controls showInteractive={false} />
+      <FitVisibleGraph canvas={canvas} />
     </ReactFlow>
   </div>;
 }

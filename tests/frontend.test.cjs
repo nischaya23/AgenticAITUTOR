@@ -199,6 +199,7 @@ test('visualization shows a React Flow slideshow with step controls', async t =>
   const button = name => [...player.querySelectorAll('button')].find(item=>item.textContent===name);
   assert.match(player.textContent,/Step 1 of 2/);
   assert.match(player.querySelector('.flow-active').textContent,/Full interval/);
+  assert.equal(player.querySelector('.flow-active').style.visibility, 'visible');
   button('Next').click();
   await until(()=>player.textContent.includes('Step 2 of 2'));
   assert.match(player.querySelector('.flow-active').textContent,/Earlier match/);
