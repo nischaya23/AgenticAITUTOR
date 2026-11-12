@@ -4,7 +4,8 @@ import json
 from contextvars import ContextVar
 from uuid import uuid4
 from sqlalchemy import select
-from . import workflow
+from openai import APIStatusError
+from . import config, logging_setup as logs, workflow
 from .db import Operation, OperationEvent, utcnow
 
 EMITTER = ContextVar('operation_emitter', default=None)
@@ -65,12 +66,15 @@ def spawn(factory, operation_id, work):
             raise
         except Exception as exc:
             workflow.outcome('failed', 'Operation failed')
-            from .logging_setup import event
-            event('operation.failed', operation_id=operation_id, error=type(exc).__name__)
-            from openai import APIStatusError
+            logs.event('operation.failed', operation_id=operation_id, error=type(exc).__name__,
+                       http_status=exc.status_code if isinstance(exc, APIStatusError) else None)
             if isinstance(exc,APIStatusError):
-                message = ('The model provider rate or quota limit was reached. Retry later.' if exc.status_code==429 else
-                    f'The model provider rejected this preparation step (HTTP {exc.status_code}). Please retry.')
+                if exc.status_code == 429:
+                    message = 'The model provider rate or quota limit was reached. Retry later.'
+                elif exc.status_code >= 500:
+                    message = f'{config.LLM_PROVIDER.title()} is temporarily unavailable (HTTP {exc.status_code}). Try again shortly.'
+                else:
+                    message = f'The model provider rejected this preparation step (HTTP {exc.status_code}). Please retry.'
             else:
                 message = str(exc) if isinstance(exc, ValueError) else 'Operation failed. Please retry.'
             finish(factory, operation_id, 'failed', error=message[:300])
@@ -83,7 +87,8 @@ def spawn(factory, operation_id, work):
         session_id=operation.data.get('session_id'), operation_id=operation_id,
         trigger={'parent_run_id': parent.run_id if parent else None, 'retry_of': operation.data.get('retry_of')})
     async def run():
-        with workflow.run(operation.kind, trace=trace, independent=True):
+        with workflow.run(operation.kind, trace=trace, independent=True), logs.scope(
+                operation_id=operation_id, operation_kind=operation.kind):
             await execute()
     task = asyncio.create_task(run())
     TASKS.add(task)

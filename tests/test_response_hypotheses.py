@@ -272,26 +272,14 @@ async def test_submission_cancels_draft_and_sessions_are_isolated(app_env, monke
     assert client.get(f'/api/sessions/{other}').json()['state']['hypothesis_state']['status'] == 'empty'
 
 
-def test_provisional_observer_failures_idle_and_retirement(monkeypatch):
-    for name, value in dict(FAILURE_THRESHOLD=1, STALL_SECONDS=30, IDLE_SECONDS=60,
-            COOLDOWN_SECONDS=45, TYPING_GRACE_SECONDS=3, AGGREGATION_SECONDS=5).items():
-        monkeypatch.setattr(config, name, value)
-    state = dict(observer=dict(problem_started_at=0, last_progress_at=0, last_action_at=0), current_problem={'id': 'q'})
-    policy = observer.new_policy()
-    _, o, _ = observer.observe(state, 'assessment', dict(correct=False, verified=False, method='llm'), .5, policy, 1)
-    assert o['failure_streak'] == 1
-    decision, o, _ = observer.observe({**state, 'observer': o}, 'student_action', {'action': 'idle'}, .5, policy, 31)
-    assert decision == 'WAKE' and 'provisional' in o['status']['reason']
-    assert policy['updates'] == 0
-    _, o, _ = observer.observe(state, 'assessment', dict(correct=True, verified=False, method='llm'), .5, policy, 10)
-    assert o['last_progress_at'] == 10 and o['failure_streak'] == 0
-    decision, _, _ = observer.observe(state, 'student_action', {'action': 'idle'}, .5, policy, 60)
-    assert decision == 'WAKE'
-    state['observer'].update(last_intervention_at=50, pending_intervention=dict(at=50, event_id=1))
-    decision, _, _ = observer.observe(state, 'student_action', {'action': 'idle'}, .5, policy, 94)
-    assert decision == 'WAIT'
-    decision, o, _ = observer.observe(state, 'student_action', {'action': 'idle'}, .5, policy, 95)
-    assert decision == 'WAKE' and o['retired_outcome']['reward'] is None
+def test_observer_activity_tracks_provisional_assessments_without_making_a_decision():
+    state = dict(observer=dict(problem_started_at=0, last_action_at=0), current_problem={'id': 'q'})
+    state['observer'] = observer.observe(state, 'assessment', {'correct': False, 'method': 'llm'}, 1)
+    assert state['observer']['failure_streak'] == 1
+    assert 'status' not in state['observer']
+    assert observer.activity_context(state, 60)['seconds_since_activity'] == 60
+    state['observer'] = observer.observe(state, 'assessment', {'correct': True, 'method': 'llm'}, 61)
+    assert state['observer']['failure_streak'] == 0
 
 
 async def test_hypothesis_evidence_validation_and_draft_status(monkeypatch):

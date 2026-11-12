@@ -48,10 +48,11 @@ CREATE_LEARNING_PLAN = (
 
 SELECT_INTERVENTION = (
     (
-        'Select one teaching tool and a short pedagogical strategy, not student-facing prose. For '
-        'proactive requests choose none when interruption is not justified. Explicit questions must'
-        ' receive an appropriate response. Prefer small hints over full solutions unless asked. '
-        'Only select highlight if the response contains text.'
+        'Select one tool from eligible_tool_scores and give a short pedagogical strategy. '
+        'Help has already been requested or approved by the Observer. Prefer higher scores among '
+        'tools that suit the question. If a hint was already delivered, try a different approach, '
+        'such as visualization for a process or relationship or a guiding question for reasoning. '
+        'Avoid giving the full solution unless asked.'
     )
 )
 

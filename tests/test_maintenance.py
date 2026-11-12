@@ -86,15 +86,32 @@ def test_model_call_sites_use_prompt_catalog():
 
 
 async def test_provider_error_is_logged_without_claiming_response(tmp_path,monkeypatch):
+    import httpx
+    from openai import InternalServerError
+
     monkeypatch.setattr(config,'LLM_PROVIDER','openai')
+    response = httpx.Response(503, request=httpx.Request('POST','https://example.test'),
+                              headers={'x-request-id':'req-test','retry-after':'5'})
+    error = InternalServerError('provider error', response=response, body={
+        'error': {'status':'UNAVAILABLE','message':'Model is overloaded. private-provider-body'},
+    })
     monkeypatch.setattr(utils,'get_client',lambda:SimpleNamespace(responses=SimpleNamespace(
-        create=AsyncMock(side_effect=ValueError('bad output')))))
+        create=AsyncMock(side_effect=error))))
     logs.setup(tmp_path)
     try:
         with logs.scope(3,'d'*32):
-            with pytest.raises(ValueError):
+            with pytest.raises(InternalServerError):
                 await utils.call_llm('instructions','input',operation='failure-test')
     finally:
         logs.shutdown()
     text=(tmp_path/('d'*32+'.log')).read_text()
     assert 'llm.failed' in text and 'llm.response' not in text
+    failed = next(line['message'] for line in map(json.loads, text.splitlines()) if line['message'].startswith('llm.failed '))
+    fields = json.loads(failed.removeprefix('llm.failed '))
+    assert fields['http_status'] == 503
+    assert fields['provider_status'] == 'UNAVAILABLE'
+    assert fields['provider_reason'] == 'capacity'
+    assert fields['provider_request_id'] == 'req-test'
+    assert fields['retry_after_seconds'] == 5
+    assert fields['input_chars'] == len('input')
+    assert 'private-provider-body' not in text

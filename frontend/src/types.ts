@@ -15,7 +15,7 @@ export type Graph = {
 };
 export type Video = { url: string; title: string; duration: number;
   chapters: { start: number; end: number; text: string }[] };
-export type Observer = { decision?: string; reason?: string; revision?: number; baseline_decision?: string; decision_source?: string; feedback_intervention_id?: number | null };
+export type Observer = { decision?: string; reason?: string; revision?: number; decision_source?: string; feedback_intervention_id?: number | null };
 export type Session = {
   current_problem: { id?: string; prompt?: string; solved?: boolean;
     format?: 'explanation' | 'trace' };

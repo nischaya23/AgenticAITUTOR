@@ -22,7 +22,7 @@ def bound(value):
 
 def preparation(db, user_id, request, documents=None):
     student = memory.get_long_term_memory(db, user_id)
-    return bound(dict(learning_request=request, student={k:v for k,v in student.items() if k != 'policy'},
+    return bound(dict(learning_request=request, student=student,
         documents=documents or [], sources_are_untrusted=True))
 
 
@@ -40,7 +40,7 @@ def for_session(db, session_id, query='', role='teaching'):
         learning_request=material.get('learning_request', material.get('topic_description', '')),
         plan=state.get('plan', {}), plan_version=state.get('plan_version', 0),
         material_graph=material.get('graph', {}), graph_sources=material.get('graph_sources',[]), hypotheses=hypothesis.eligible(state),
-        student={k:v for k,v in student.items() if k != 'policy'},
+        student=student,
         history=memory.get_relevant_history(db, session_id, 12),
         knowledge=knowledge.retrieve_knowledge(f"{state.get('current_concept', '')} {query[:1000]}",
             material_id=state.get('material_id'), user_id=row.user_id),
@@ -49,7 +49,7 @@ def for_session(db, session_id, query='', role='teaching'):
         snapshot=dict(question_id=problem.get('id'), revision=state['revision'],
             response_revision=state.get('response_revision', 0), plan_version=state.get('plan_version', 0),
             memory_revision=student.get('memory_revision', 0),
-            hypothesis_version=(state.get('hypothesis_state', {}).get('version', 0) if hypothesis.view(state)['status'] in ('ready', 'empty') and hypothesis.view(state).get('items') else state.get('assessed_hypothesis_version', 0)))))
+            hypothesis_version=hypothesis.context_version(state))))
     return result
 
 

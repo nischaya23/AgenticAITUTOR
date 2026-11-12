@@ -1,12 +1,13 @@
 """Shared validation, model clients, provider adapters, and metrics."""
 import asyncio
 import json
+import re
 import time
 from types import SimpleNamespace
 from collections import Counter
 from functools import lru_cache
 from typing import Literal
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from openai import APIStatusError, AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from . import workflow, config, prompts, logging_setup as logs
 from .response import Schema, Response
@@ -63,23 +64,65 @@ class StudentData(BaseModel):
     memories: list[str] = Field(default_factory=list)
     learning_goals: list[str] = Field(default_factory=list)
     effective_interventions: dict[str, JsonValue] = Field(default_factory=dict)
-    policy: dict[str, JsonValue] = Field(default_factory=dict)
     hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=8)
     memory_revision: int = 0
     student_goals: list[str] = Field(default_factory=list)
 
 
-async def provider_request(request):
-    # SDK retry metadata is read locally; headers, URLs and credentials are never stored.
+def provider_attempt(request) -> int:
     count = request.headers.get('x-stainless-retry-count', '0')
-    workflow.record('provider.attempt', status='running', attempt=int(count)+1 if count.isdigit() else 1)
+    return int(count) + 1 if count.isascii() and count.isdecimal() and len(count) <= 3 else 1
+
+
+def provider_response_fields(response) -> dict:
+    fields = {'http_status': response.status_code}
+    for name in ('x-request-id', 'x-goog-request-id'):
+        value = response.headers.get(name, '')
+        if re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', value):
+            fields['provider_request_id'] = value
+            break
+    retry_after = response.headers.get('retry-after', '')
+    if re.fullmatch(r'[0-9]{1,8}(?:\.[0-9]{1,3})?', retry_after):
+        fields['retry_after_seconds'] = float(retry_after)
+    return fields
+
+
+def provider_error_fields(exc: APIStatusError) -> dict:
+    fields = provider_response_fields(exc.response)
+    body = exc.body if isinstance(exc.body, dict) else {}
+    error = body.get('error', body)
+    if not isinstance(error, dict):
+        return fields
+    status = error.get('status')
+    if isinstance(status, str) and status in (
+        'UNAVAILABLE', 'RESOURCE_EXHAUSTED', 'INTERNAL', 'DEADLINE_EXCEEDED',
+        'INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'PERMISSION_DENIED', 'UNAUTHENTICATED', 'NOT_FOUND',
+    ):
+        fields['provider_status'] = status
+    message = error.get('message', '')
+    if exc.status_code == 503 and isinstance(message, str):
+        normalized = message.lower()
+        if any(hint in normalized for hint in ('high demand', 'overload', 'capacity')):
+            fields['provider_reason'] = 'capacity'
+    return fields
+
+
+async def provider_request(request):
+    request.extensions['tutor_attempt_started'] = time.perf_counter()
+    attempt = provider_attempt(request)
+    workflow.record('provider.attempt', status='running', attempt=attempt)
+    logs.event('llm.http_attempt', attempt=attempt)
 
 
 async def provider_response(response):
-    count = response.request.headers.get('x-stainless-retry-count', '0')
+    started = response.request.extensions.get('tutor_attempt_started')
+    fields = dict(provider_response_fields(response), attempt=provider_attempt(response.request),
+                  retryable=response.status_code in (408, 409, 429) or response.status_code >= 500)
+    if started is not None:
+        fields['duration_ms'] = round((time.perf_counter() - started) * 1000, 2)
     workflow.record('provider.response', status='warnings' if response.status_code >= 400 else 'completed',
-        attempt=int(count)+1 if count.isdigit() else 1, http_status=response.status_code,
-        retryable=response.status_code in (408, 409, 429) or response.status_code >= 500)
+        **fields)
+    logs.event('llm.http_response', **fields)
 
 
 def provider_transport():
@@ -112,16 +155,13 @@ async def _call_llm(
     """Support OpenAI Responses and Gemini-compatible Chat Completions."""
     started = time.perf_counter()
     METRICS["llm_calls"] += 1
+    provider = config.LLM_PROVIDER
+    selected_model = model or (config.GEMINI_MODEL if provider == 'gemini' else config.OPENAI_MODEL)
+    input_chars = None
+    output_budget = max_output_tokens if max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
     try:
         client = get_client()
-        provider = config.LLM_PROVIDER
-
-        selected_model = model or (
-            config.GEMINI_MODEL
-            if provider == "gemini"
-            else config.OPENAI_MODEL
-        )
 
         if not selected_model:
             raise ValueError(f"No model configured for {provider}.")
@@ -134,14 +174,14 @@ async def _call_llm(
             else json.dumps(input_data)
         )
 
-        if len(payload) > config.MAX_INPUT_CHARS:
+        input_chars = len(payload)
+        if input_chars > config.MAX_INPUT_CHARS:
             raise ValueError("Context exceeds the input budget; shorten the current task.")
 
         timeout = config.API_TIMEOUT * 3 + 5
         history = kwargs.pop("tool_history", [])
         workflow.model_context(input_data, history)
         wants_tools = bool(kwargs.get("tools"))
-        output_budget = max_output_tokens if max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
         if schema is not None and wants_tools:
             raise ValueError(
@@ -319,7 +359,10 @@ async def _call_llm(
 
     except Exception as exc:
         METRICS["llm_errors"] += 1
-        logs.event('llm.failed', prompt=operation, error=type(exc).__name__)
+        fields = provider_error_fields(exc) if isinstance(exc, APIStatusError) else {}
+        logs.event('llm.failed', prompt=operation, provider=provider, model=selected_model,
+                   error=type(exc).__name__, input_chars=input_chars, instruction_chars=len(instructions),
+                   output_token_budget=output_budget, **fields)
         raise
 
     finally:
