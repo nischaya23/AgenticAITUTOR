@@ -60,6 +60,7 @@ async def prepare_topic(user_id, description, meaning=None):
     with SessionLocal() as db:
         learning_context=context.preparation(db,user_id,description)
     if meaning is None:
+        await operations.progress('interpreting_topic', message='Interpreting your topic.')
         meanings=await websearch.interpret_topic(description, learning_context=learning_context)
         if len(meanings)>1:
             return dict(type='choices',meanings=[m.model_dump() for m in meanings])

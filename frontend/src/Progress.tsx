@@ -1,6 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import Workflow from './Workflow';
-import type { Operation, ProgressEvent, Video } from './types';
+import ActivityFlow, { type FlowStep, type StepDescription } from './ActivityFlow';
+import type { Operation, Video } from './types';
+
+const reviewingSources = { label: 'Reviewing sources', actor: 'Research Agent' };
+const preparationLabels: Record<string, StepDescription> = {
+  reading: { label: 'Reading material', actor: 'Python' },
+  interpreting_topic: { label: 'Interpreting your topic', actor: 'Topic interpretation model' },
+  searching: { label: 'Searching sources', actor: 'Research Agent' },
+  candidate: reviewingSources,
+  fetched: reviewingSources,
+  selected: reviewingSources,
+  building_graph: { label: 'Building your learning map', actor: 'Knowledge Agent' },
+  checking_evidence: { label: 'Checking evidence', actor: 'Knowledge Agent' },
+};
+
+const videoLabels: Record<string, StepDescription> = {
+  rendering: { label: 'Rendering the animation', actor: 'Pillow / FFmpeg' },
+  repairing: { label: 'Repairing the animation script', actor: 'Animation model' },
+  cache_hit: { label: 'Loading the saved animation', actor: 'Video renderer' },
+};
 
 async function request<T>(path: string, body?: object): Promise<T> {
   const response = await fetch(path, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined);
@@ -9,23 +27,25 @@ async function request<T>(path: string, body?: object): Promise<T> {
   return data;
 }
 
-function useOperation(id: string) {
+function useOperation(id: string | null) {
   const [state,setState] = useState<Operation | null>(null);
   const [error,setError] = useState('');
   const [refresh,setRefresh] = useState(0);
-  const [version,setVersion] = useState(0);
   useEffect(() => {
+    if (!id) return;
     let stopped=false, stream: EventSource | undefined, timer: ReturnType<typeof setTimeout>;
     async function read() {
       try {
         const next=await request<Operation>('/api/operations/'+id);
         if (stopped) return;
-        setState(next);setVersion(value=>value+1);setError('');
+        setState(next);setError('');
         if (next.status !== 'running') {stream?.close();return;}
         if (!stream && typeof EventSource !== 'undefined') {
           const after=next.events.at(-1)?.id ?? 0;
-          stream=new EventSource('/api/operations/'+id+'/events?after='+after+'&workflow_after=0');
-          stream.onmessage=() => {void read();};
+          stream=new EventSource('/api/operations/'+id+'/events?after='+after);
+          stream.onmessage=event => {
+            if (JSON.parse(event.data).kind !== 'workflow_events') void read();
+          };
           stream.onerror=() => {stream?.close();stream=undefined;clearTimeout(timer);timer=setTimeout(read,2000);};
         } else if (!stream) timer=setTimeout(read,1000);
       } catch (e) {if (!stopped) {setError((e as Error).message);timer=setTimeout(read,3000);}}
@@ -33,22 +53,13 @@ function useOperation(id: string) {
     void read();
     return () => {stopped=true;stream?.close();clearTimeout(timer);};
   },[id,refresh]);
-  return {state,error,version,reload:()=>setRefresh(x=>x+1)};
+  return {state,error,reload:()=>setRefresh(x=>x+1)};
 }
 
-export function ResearchTimeline({events}: {events:ProgressEvent[]}) {
-  return <details className="research-timeline" open><summary>Research and preparation</summary>
-    <ol aria-live="polite">{events.map((event,i)=><li key={event.id ?? i} className={'research-'+event.kind}>
-      <strong>{event.kind.replaceAll('_',' ')}</strong>{event.query && <span>: {event.query}</span>}
-      {event.url && <p><a href={event.url} target="_blank" rel="noopener noreferrer">{event.title || event.url}</a></p>}
-      {(event.reason || event.message) && <p>{event.reason || event.message}</p>}
-      {event.quote && <blockquote>{event.quote}</blockquote>}
-    </li>)}</ol>
-  </details>;
-}
-
-export function PreparationPanel({id,onReady,onWaiting}: {id:string;onReady:(materialId:string)=>Promise<void>;onWaiting?:()=>void}) {
-  const {state,error,reload,version}=useOperation(id);
+export function PreparationPanel({id,upload,onReady,onWaiting}: {
+  id: string | null; upload?: boolean; onReady: (materialId:string)=>Promise<void>; onWaiting?: ()=>void;
+}) {
+  const {state,error,reload}=useOperation(id);
   const opened=useRef('');
   const [notice,setNotice]=useState('');
   const [acting,setActing]=useState(false);
@@ -58,13 +69,25 @@ export function PreparationPanel({id,onReady,onWaiting}: {id:string;onReady:(mat
   }
   useEffect(()=>{
     if(state && ['failed','interrupted','needs_clarification'].includes(state.status)) onWaiting?.();
-    if (state?.status==='ready' && state.result?.id && opened.current!==id) {
+    if (id && state?.status==='ready' && state.result?.id && opened.current!==id) {
       opened.current=id; void onReady(state.result.id);
     }
   },[state,id,onReady]);
+  const descriptions = [...new Set(state?.events.map(event => preparationLabels[event.kind]).filter(Boolean))];
+  if (state?.status === 'ready') descriptions.push({label: 'Learning map ready'});
+  if (state?.status === 'needs_clarification') descriptions.push({label: 'Choose a subject'});
+  if (!descriptions.length && (id || !upload)) descriptions.push({label: 'Preparing your learning map'});
+  const steps = descriptions.map<FlowStep>((description, index) => ({
+    ...description,
+    id: description.label,
+    state: index < descriptions.length - 1 || state?.status === 'ready' ? 'done'
+      : !state || state.status === 'running' ? 'working' : 'paused',
+  }));
+  if (upload || state?.kind === 'upload') {
+    steps.unshift({id: 'upload', label: id ? 'Files uploaded' : 'Uploading files', state: id ? 'done' : 'working'});
+  }
   return <section className="preparation-panel" aria-label="Learning preparation">
-    <p role="status">{state?.status==='running' ? 'Preparing your learning map…' : state?.status?.replaceAll('_',' ') ?? 'Connecting to preparation…'}</p>
-    <h2>Agentic workflow</h2><Workflow operationId={id} refreshKey={version} />
+    <ActivityFlow label="Preparation progress" steps={steps} />
     {state?.status==='needs_clarification' && <div><p>Which subject do you mean?</p>
       {state.result?.meanings?.map((meaning,index)=><button type="button" key={index} disabled={acting}
         onClick={()=>void act('/api/material-jobs/'+id+'/meaning',{index})}>{meaning.label} — {meaning.description}</button>)}</div>}
@@ -93,10 +116,19 @@ export function VideoJob({id,title}: {id:string;title:string}) {
   const {state,error}=useOperation(currentId);
   const [retryError,setRetryError]=useState('');
   if(state?.status==='ready' && !state.result?.discarded) return null;
+  const stage = state?.events.filter(event => videoLabels[event.kind]).at(-1);
+  const discarded = state?.result?.discarded;
+  const paused = state?.status === 'failed' || state?.status === 'interrupted';
   return <section className="video-job" aria-label="Animation progress"><strong>{title}</strong>{state?.content && <p>{state.content}</p>}
-    <p role="status">{state?.result?.discarded ? 'Animation discarded because your work changed.' : state?.status==='failed' ? 'Video unavailable; your written explanation is saved.' : state?.events.at(-1)?.message ?? 'Preparing your animation…'}</p>
+    {discarded ? <p role="status">Animation discarded because your work changed.</p> : <>
+      <ActivityFlow label="Animation step" steps={[{
+        ...(stage ? videoLabels[stage.kind] : {label: 'Preparing your animation', actor: 'Video renderer'}),
+        id: stage?.kind ?? 'preparing', state: paused ? 'paused' : 'working',
+      }]} />
+      {paused && <p role="status">Video unavailable. Your written explanation is saved.</p>}
+    </>}
     {(error || state?.error || retryError) && <p>{error || state?.error || retryError}</p>}
-    {(state?.status==='failed' || state?.status==='interrupted') && <button type="button" onClick={async()=>{
+    {paused && <button type="button" onClick={async()=>{
       try {const next=await request<{operation_id:string}>('/api/operations/'+currentId+'/retry-video',{});setCurrentId(next.operation_id);}
       catch(e){setRetryError((e as Error).message);}
     }}>Retry animation</button>}

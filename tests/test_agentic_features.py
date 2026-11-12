@@ -66,6 +66,7 @@ def test_topic_job_research_graph_progress_and_ownership(app_env,monkeypatch):
     assert response.status_code==202
     oid=response.json()['id'];job=wait_job(client,oid)
     assert job['status']=='ready',job
+    assert job['events'][0]['kind']=='interpreting_topic'
     assert any(e['kind']=='selected' and e['url']=='https://example.org/search' for e in job['events'])
     material_id=job['result']['id']
     sid=client.post('/api/sessions').json()['id']
