@@ -1,6 +1,6 @@
 # Studyroom — Agentic AI Tutor
 
-Describe what you want to learn or upload course notes. Studyroom researches the subject, explains which websites it selects, builds a sourced knowledge graph, and tutors you through text questions. Learning memory is visible and correctable. Visual explanations are interactive React Flow slideshows.
+Describe what you want to learn or upload course notes. Studyroom builds a learning map and tutors you through text questions. It can research sources, offer proactive help, and generate interactive React Flow slideshows. You can review and correct parts of your learning memory.
 
 The application uses FastAPI, React/TypeScript, SQLite, and the configured OpenAI or Gemini provider. Agents are cooperating Python modules; no external agent framework is required.
 
@@ -18,6 +18,8 @@ npm run build
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
+In PowerShell, activate the virtual environment with `.\.venv\Scripts\Activate.ps1`.
+
 Configure one provider in `.env`:
 
 ```dotenv
@@ -32,18 +34,21 @@ Open http://127.0.0.1:8000. For development, keep FastAPI running and use `npm r
 
 Create an email/password account. Accounts own their materials, sessions, operations and learning memory. Passwords use scrypt; revocable login cookies are HttpOnly. Set `COOKIE_SECURE=true` for HTTPS and configure `CORS_ORIGINS` for additional development origins.
 
+## Agent flow
+
+![Studyroom agent flow showing preparation, the Python orchestrator, tutoring, assessment, and the learning memory loop](docs/agent-flow.png)
+
+The Python backend coordinates preparation. During study, the orchestrator routes help requests and submissions, then saves results that can inform the next question. See [the architecture notes](docs/ARCHITECTURE.md) for the detailed flow.
+
 ## Study and memory
 
-- Enter a topic description, level and goals; no upload is required. Ambiguous topics ask which meaning you intend.
-- Alternatively, upload up to ten text-based PDF, TXT or Markdown files. Each file is limited to 8 MiB; combined extracted text is limited to 600,000 characters. Scanned PDFs require OCR.
-- Research progress shows queries, candidate pages, selection/rejection reasons and supporting quotations. Accepted evidence is retained if a later research request fails.
+- Enter a topic and learning goals, or upload up to ten text-based PDF, TXT or Markdown files. Each file is limited to 8 MiB and combined extracted text to 600,000 characters. Scanned PDFs require OCR.
+- Preparation shows a short progress flow with the agent or component handling each step. If a topic is ambiguous, choose the intended meaning.
 - The learning map shows concepts, prerequisites and any verified source quotes. Click an unlocked concept to focus on it.
-- Questions and student responses are text-only. Saved legacy diagrams are not editable; active diagram questions are replaced on resume without mastery credit.
+- Practice questions and workspace answers are text-only.
 - Request hints, explanations, text review, guiding questions, visualizations or web search. Automatic help can be disabled in the workspace.
 - The Memory tab shows session context, long-term mastery, goals, reflections, hypotheses and misconceptions. Correct summaries/goals or dispute misconceptions without changing grades or deleting evidence.
 - Visualizations show a graph with highlighted nodes, step explanations, and playback controls.
-
-See [the complete numbered agent flow and architecture](docs/ARCHITECTURE.md).
 
 ## Observer
 
@@ -59,21 +64,20 @@ OBSERVER_REVIEW_SECONDS=30
 PROVIDER_CONCURRENCY=3
 ```
 
-LLM grading is provisional and updates progress and heuristic mastery. Reflection retains linked feedback and verified outcomes as evidence about delivered help.
+LLM grading is provisional. Assessment scores update mastery through Bayesian Knowledge Tracing. Reflection saves a learning summary and next goal, and Hypothesis analysis records possible gaps for future practice.
 
 ## Web research
 
 ```dotenv
 WEB_SEARCH_PROVIDER=free
+WEB_SEARCH_ON_UPLOAD=true
 WEB_SEARCH_MAX_PAGES=4
 WEB_SEARCH_TIMEOUT=15
 ```
 
-`free` uses Wikipedia and DuckDuckGo. `gemini` uses Google grounding links, then fetches the actual linked pages; it falls back to free search when necessary. `off` disables research. Uploads still work from their own evidence; topic-only preparation needs usable sources.
+`free` uses Wikipedia and DuckDuckGo. `gemini` fetches pages from Google grounding links and falls back to free search when needed. Set `WEB_SEARCH_ON_UPLOAD=false` to build upload maps from the files alone, or `WEB_SEARCH_PROVIDER=off` to disable web search across the app. Topic-only preparation needs usable web sources.
 
-A shared native `web_search` function tool is available during preparation and study. Research is bounded to three searches per preparation and two per study request, with up to four fetched candidates per search. Existing accepted web passages are reused. Gemini tool-call metadata is retained across turns, and its graph transport is kept shallow before full local validation.
-
-Fetched content is untrusted data. Private/loopback addresses and unsafe redirects are refused, pages have size limits, and supporting quotes must match supplied text. Selection establishes relevance, not guaranteed factual correctness.
+Accepted passages can be reused in study. Learning map quotes are optional and must match the supplied text to appear as evidence.
 
 ## Persistence and APIs
 
@@ -89,7 +93,7 @@ Important endpoints:
 - `POST /api/sessions` with `preparation_id` — create or reopen the chat for a completed preparation.
 - Existing session, material, student, study and `/ws/{id}` routes remain available. Schemas are at `/docs`.
 
-Run one Uvicorn worker: task queues and locks live in the process. Refreshing restores saved work and operation progress. Interrupted preparation jobs can be retried; unfinished model calls are not replayed. No student-submitted code is executed.
+Run one Uvicorn worker because task queues and locks live in that process. Reopen a saved chat from the sidebar to recover your work. If preparation is interrupted, choose the files again or retry the topic.
 
 ## Validation
 

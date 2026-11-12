@@ -1,96 +1,32 @@
-# Agentic workflow
+# Workflow tracing
 
-The study panel combines preparation, independent background reviews, teaching,
-assessment, memory changes, research, and video delivery. Teaching messages stay
-visible with their activity cards collapsed. Older messages with no trace remain
-readable and say that detailed activity was not recorded.
+The frontend shows preparation stages and up to four recent tutor steps, with the responsible agent or component on each step. Tutor replies stay in the conversation. Slideshows arrive as ordinary teaching replies and render in React Flow. The read APIs below expose detailed traces.
 
-The default view groups repeated memory reads and adjacent unchanged numerical
-Observer decisions. All, Agents, Tools, Memory, Context, and Errors filters apply
-to recorded activity. Graph nodes and timeline steps share a public inspector.
-Artifacts load when opened. Scrolling away from the latest activity preserves the
-reading position and exposes a New activity button.
+## What is recorded
 
-## Storage and lineage
+- SQLite stores runs, spans, events and artifacts in `workflow_runs`, `workflow_spans`, `workflow_events` and `workflow_artifacts`. Workflow events and artifacts are immutable. Identical public artifacts can share storage within an account.
+- Independent jobs have separate runs. Nested spans capture agent stages, provider waits and attempts, and tool execution. Dependencies link a stage to the plan or hypothesis version it actually used. Run outcomes include completion, warnings, failure, cancellation, stale work and restart interruption.
+- Memory changes and their before/after artifacts commit together. The trace captures compacted model inputs with protected fields removed, including credentials, provider signatures, system instructions, private answers and rubrics. Retrieved passages, passages included in context and explicit citations are tracked separately.
+- Preparation runs attach to their material, including runs for clarification or retry. Sessions can reference that history. Application event IDs link saved teaching replies to their workflow runs.
 
-SQLite has four additive tables: `workflow_runs`, `workflow_spans`,
-`workflow_events`, and `workflow_artifacts`. Existing application events and
-operation history remain intact. Workflow events and artifacts are immutable at
-the database level. Artifact identities include the owning account, artifact kind,
-and public contents, allowing repeated snapshots to share storage within that
-account. Spans and event references retain artifacts with their session.
+## Read APIs
 
-Each independent worker owns a run. An immutable ContextVar trace is explicitly
-bound in queued background workers and operation jobs. Nested spans describe agent
-stages, provider-slot waiting, model requests, tool execution and rendering. Runs
-record queued/running work, completion, completion with warnings, failure,
-cancellation, discarded stale work and restart interruption separately. Existing
-teaching/grading locks, review debounce intervals and provider concurrency limits
-continue to govern execution. Tracing does not call models.
+All routes require an authenticated account and enforce ownership.
 
-Dependencies include structural parent edges, preceding stages in the same task,
-and exact consumed plan/hypothesis artifact versions, including across runs.
-An Observer reading version 3 links to version 3 even when version 4 completes
-first. Background run triggers retain event/snapshot references. Video operation
-runs remain active through rendering and delivery; a script-generation run can
-finish while the video operation continues.
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/sessions/{id}/workflow?before={cursor}&limit=20` | Paginated history, active runs, stream watermark and tracking status |
+| `GET /api/sessions/{id}/workflow/events?after={cursor}&limit=200` | Ordered replay, next cursor and `has_more` |
+| `GET /api/workflow/runs/{id}` | Spans, dependency edges, events and artifact summaries |
+| `GET /api/workflow/artifacts/{id}` | Immutable, redacted artifact contents |
+| `GET /api/operations/{id}/workflow` | Preparation run history and replay |
 
-Memory changes and their before/after artifacts join the memory transaction;
-rolled-back changes do not appear as committed updates. Read evidence is buffered
-locally until a tracing boundary so read-only context sessions can close without
-losing their evidence or unnecessarily acquiring SQLite write locks. Workflow and
-memory inspection GETs create no workflow runs or memory activity.
+## Live delivery
 
-Provider-bound input snapshots are captured after context compaction. The public
-projection excludes grading references/rubrics, system instructions, policy,
-credentials, provider envelopes/signatures and hidden reasoning. Context artifacts
-retain response, plan, memory and hypothesis versions, included passages, budget
-omissions and differences from the previous model input. Retrieval, model-input
-inclusion and explicit output citations are separate records; retrieval alone is
-never described as evidence of internal source use. Public payloads are bounded;
-any storage-budget omission is explicit.
+The backend sends committed `workflow_events` batches on `/ws/{id}?workflow=1`. The frontend uses selected events for the tutor progress flow and reloads the saved conversation and study state on reconnect. Clients that need detailed replay can use the session events API.
 
-Preparation runs link to their material, including earlier clarification/retry
-runs for the same operation. Sessions reference that material history without
-copying it. Application event IDs link messages and videos to their workflow run
-so delivered outputs appear once.
-
-## Read APIs and delivery
-
-All routes require the existing authenticated account and check ownership.
-
-- `GET /api/sessions/{id}/workflow?before={cursor}&limit=20`: completed history,
-  all active runs regardless of pagination, next cursor, stream watermark and
-  tracking completeness.
-- `GET /api/sessions/{id}/workflow/events?after={cursor}&limit=200`: ordered replay
-  with a continuation cursor and `has_more`.
-- `GET /api/workflow/runs/{id}`: spans, dependency edges, committed events and
-  artifact summaries.
-- `GET /api/workflow/artifacts/{id}`: immutable public artifact contents.
-- `GET /api/operations/{id}/workflow`: preparation/rendering history and replay.
-
-One dispatcher reads committed workflow events in cursor order and sends batches
-as `workflow_events` on the authenticated WebSocket (`/ws/{id}?workflow=1`).
-The query flag opts the migrated UI into activity batches while legacy socket
-clients continue to receive their existing messages. Clients reconcile snapshots
-and replay missed events on reconnection, using stable event/run IDs to deduplicate.
-Operation SSE carries workflow batches with an independent workflow cursor; clients
-can pass `workflow_after` alongside the existing `after`/Last-Event-ID cursor.
-Legacy operation progress and socket messages remain compatible.
-
-Tracking errors are fail-open. Tutoring continues, and the panel reports incomplete
-activity rather than claiming successful tracking. No external observability
-service or additional runtime dependencies are required.
+Preparation progress streams from `/api/operations/{id}/events`. Operation events use `after` or `Last-Event-ID`, and trace batches use a separate `workflow_after` cursor. The preparation panel displays stages from operation events. If tracking fails, tutoring continues and the backend exposes tracking status separately.
 
 ## Verification
 
-`tests/test_workflow.py` covers task isolation, provider-bound projections, queue
-measurements, commit/rollback visibility, immutable snapshots, consumed-version
-lineage, outcomes, pagination, account isolation, preparation attachment, ordered
-streaming and fail-open tutoring. Frontend DOM tests cover concurrent run headers,
-graph keyboard selection, artifact inspection, filters, grouping, scroll position,
-new activity and single delivery of linked messages, alongside existing study UI
-coverage.
-
-Run `.venv/bin/pytest -q` and `npm test` from the repository root. Paid provider and
-Chromium browser tests retain their existing opt-in environment flags.
+Run `python -m pytest -q tests/test_workflow.py` and `npm test` from the repository root. Backend tests cover trace privacy, version lineage, transactions, pagination, ownership and delivery. Frontend tests cover the progress flow and saved conversation.
