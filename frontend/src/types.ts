@@ -60,9 +60,10 @@ export type ProgressEvent = { id?: number; kind: string; message?: string; title
   query?: string; reason?: string; quote?: string; timestamp?: string };
 export type Operation = { kind?: string; id: string; status: string; error?: string; events: ProgressEvent[];
   result?: { id?: string; type?: string; meanings?: Meaning[] } };
-export type MemoryItem = { id: string; kind: string; original_text: string; effective_text: string;
-  concept?: string; source_event_id?: number; updated_at?: string; disputed: boolean; student_note: string;
-  edits: {at: string; action: string; before: string; text: string}[] };
-export type MemorySnapshot = { revision: number; short_term: { concept?: string; question?: string; response: Response;
-  plan: Partial<LearningPlan>; assessment?: Assessment; hypotheses?: HypothesisState; assessment_pending: boolean };
-  long_term: {mastery: Record<string,number>; hypotheses: Hypothesis[]}; items: MemoryItem[] };
+export type LongTermMemory = {
+  mastery: Record<string, number>;
+  hypotheses: Hypothesis[];
+  learner_profile?: string;
+  student_goals?: string[];
+  concept_memory?: Record<string, { name: string; summary?: string; next_goal?: string }>;
+};

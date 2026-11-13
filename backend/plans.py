@@ -18,7 +18,7 @@ async def ensure(session_id, factory):
         if row.state.get('plan', {}).get('steps'):
             return view(row.state)
         from .orchestrator import context_for
-        context = context_for(db, session_id)
+        context = context_for(db, session_id, role='planning')
         material = knowledge.get_material(row.state['material_id'])
         context.update(material_graph=material['graph'], knowledge=material['chunks'][:4])
     plan = await planner.create_learning_plan(context)

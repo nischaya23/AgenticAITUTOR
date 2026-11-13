@@ -58,14 +58,34 @@ def normalize_mastery(values) -> dict[str, float]:
     return result
 
 
+def normalize_concept(name) -> str:
+    """Stable key so the same concept studied in different materials shares one memory entry."""
+    return ' '.join(str(name or '').split()).casefold()
+
+
+class ConceptMemory(BaseModel):
+    """Rolling, reflection-maintained memory for one concept (keyed by normalize_concept)."""
+    model_config = ConfigDict(extra='ignore')
+    name: str
+    summary: str = Field(default='', max_length=2000)
+    next_goal: str = Field(default='', max_length=500)
+    attempts: int = 0
+    material_ids: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    evidence_event_ids: list[int] = Field(default_factory=list)
+    updated_at: str | None = None
+
+
 class StudentData(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mastery: dict[str, float] = Field(default_factory=dict)
     misconceptions: list[dict[str, JsonValue]] = Field(default_factory=list)
-    memories: list[str] = Field(default_factory=list)
-    learning_goals: list[str] = Field(default_factory=list)
+    concept_memory: dict[str, ConceptMemory] = Field(default_factory=dict)
+    learner_profile: str = Field(default='', max_length=1000)
+    # Untagged notes from the old flat format: visible to the student, never sent to agents.
+    archived_notes: list[str] = Field(default_factory=list)
     effective_interventions: dict[str, JsonValue] = Field(default_factory=dict)
-    hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=8)
+    hypotheses: list[dict[str, JsonValue]] = Field(default_factory=list)
     memory_revision: int = 0
     student_goals: list[str] = Field(default_factory=list)
 

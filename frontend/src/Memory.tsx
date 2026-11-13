@@ -1,76 +1,101 @@
 import { useEffect, useState } from 'react';
-import type { MemoryItem, MemorySnapshot } from './types';
-import Hypotheses from './Hypotheses';
+import type { LongTermMemory } from './types';
 
-export default function MemoryPanel({sessionId,active,version}: {sessionId:number;active:boolean;version:number}) {
-  const [memory,setMemory]=useState<MemorySnapshot | null>(null);
-  const [error,setError]=useState('');
-  const [editing,setEditing]=useState<string | null>(null);
-  const [text,setText]=useState('');
-  const [busy,setBusy]=useState(false);
-  const [refresh,setRefresh]=useState(0);
-  useEffect(()=>{
-    if(!active) return;
-    let stopped=false;
-    void fetch('/api/sessions/'+sessionId+'/memory').then(async response=>{
-      const data=await response.json();
-      if(!response.ok) throw Error(data.detail ?? 'Memory unavailable.');
-      if(!stopped){setMemory(data);setError('');}
-    }).catch(e=>{if(!stopped) setError(e.message);});
-    return ()=>{stopped=true;};
-  },[sessionId,active,version,refresh]);
-  async function save(item?:MemoryItem) {
-    if(!memory || !text.trim()) return;
-    setBusy(true);
-    try {
-      const response=await fetch('/api/sessions/'+sessionId+'/memory/corrections',{method:'POST',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({expected_revision:memory.revision,
-          action:!item ? 'add_goal' : item.kind==='misconception' ? 'dispute' : 'edit',item_id:item?.id ?? null,text:text.trim()})});
-      const data=await response.json();
-      if(!response.ok) {setRefresh(x=>x+1);throw Error(data.detail ?? 'Correction failed.');}
-      setMemory(data);setEditing(null);setText('');setError('');
-    }catch(e){setError((e as Error).message);}finally{setBusy(false);}
+type ConceptRow = {
+  name: string;
+  mastery?: number;
+  summary?: string;
+  nextGoal?: string;
+  gaps: string[];
+};
+
+function conceptRows(memory: LongTermMemory) {
+  const rows = new Map<string, ConceptRow>();
+  function rowFor(name: string) {
+    const key = name.trim().replace(/\s+/g, ' ').toLowerCase();
+    let row = rows.get(key);
+    if (!row) {
+      row = { name, gaps: [] };
+      rows.set(key, row);
+    }
+    return row;
   }
-  function editor(item?:MemoryItem) {
-    return <form onSubmit={event=>{event.preventDefault();void save(item);}}>
-      <label htmlFor="memory-correction">{item?.kind==='misconception' ? 'Explain your disagreement' : 'Your correction or learning goal'}</label>
-      <textarea id="memory-correction" value={text} maxLength={2000} onChange={event=>setText(event.target.value)} />
-      <button disabled={busy || !text.trim()}>Save</button><button type="button" onClick={()=>setEditing(null)}>Cancel</button>
-    </form>;
+
+  for (const entry of Object.values(memory.concept_memory ?? {})) {
+    const row = rowFor(entry.name);
+    row.summary = entry.summary;
+    row.nextGoal = entry.next_goal;
   }
-  function items(kind:string) {
-    const entries=memory?.items.filter(item=>item.kind===kind) ?? [];
-    return entries.length ? <ul>{entries.map(item=><li key={item.id}>
-      <p>{item.effective_text}</p>{item.concept && <small>{item.concept}</small>}
-      {item.disputed && <p>Disputed by you: {item.student_note}</p>}
-      <p className="muted">{item.updated_at ? 'Updated '+new Date(item.updated_at).toLocaleString() : 'Saved earlier; date unavailable'}
-        {item.source_event_id ? ' · Evidence event '+item.source_event_id : ' · Earlier evidence reference unavailable'}</p>
-      <details><summary>Original and correction history</summary><p>{item.original_text}</p>
-        <ul>{item.edits.map((edit,i)=><li key={i}>{new Date(edit.at).toLocaleString()}: {edit.text}</li>)}</ul></details>
-      {editing===item.id ? editor(item) : <button type="button" disabled={busy} onClick={()=>{
-        setEditing(item.id);setText(item.kind==='misconception' ? item.student_note : item.effective_text);
-      }}>{kind==='misconception' ? 'Dispute' : 'Correct'}</button>}
-    </li>)}</ul> : <p className="muted">Nothing saved yet.</p>;
+  for (const [name, mastery] of Object.entries(memory.mastery)) rowFor(name).mastery = mastery;
+  for (const hypothesis of memory.hypotheses) {
+    if (hypothesis.status !== 'resolved' && hypothesis.status !== 'weakened') {
+      rowFor(hypothesis.concept).gaps.push(hypothesis.possible_gap);
+    }
   }
-  return <section aria-label="Learning memory"><h2>Learning memory</h2>
-    <p>Your current session and what the tutor remembers across sessions. Estimates and possible misconceptions can be wrong.</p>
+  return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export default function MemoryPanel({ sessionId, active, version }: {
+  sessionId: number; active: boolean; version: number;
+}) {
+  const [memory, setMemory] = useState<LongTermMemory | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!active) return;
+    let stopped = false;
+    void fetch('/api/sessions/' + sessionId + '/memory').then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw Error(data.detail ?? 'Memory unavailable.');
+      if (!stopped) {
+        setMemory(data.long_term);
+        setError('');
+      }
+    }).catch(error => { if (!stopped) setError(error.message); });
+    return () => { stopped = true; };
+  }, [sessionId, active, version]);
+
+  const rows = memory ? conceptRows(memory) : [];
+  const profile = memory?.learner_profile;
+  const goals = memory?.student_goals ?? [];
+  const hasMemory = Boolean(rows.length || profile || goals.length);
+
+  return <section aria-labelledby="learning-memory-title">
+    <h2 id="learning-memory-title">Learning memory</h2>
     {error && <p role="alert">{error}</p>}
-    {!memory ? <p>Loading memory…</p> : <>
-      <h3>Short-term · This session</h3>
-      <dl><dt>Concept</dt><dd>{memory.short_term.concept || 'Not selected'}</dd>
-        <dt>Question</dt><dd>{memory.short_term.question || 'No current question'}</dd>
-        <dt>Saved response</dt><dd className="memory-response">{memory.short_term.response.text || 'No saved response yet'}</dd>
-        <dt>Objective</dt><dd>{memory.short_term.plan.objective}</dd>
-        <dt>Assessment</dt><dd>{memory.short_term.assessment_pending ? 'In progress' : memory.short_term.assessment?.reason || 'Not assessed yet'}</dd></dl>
-      <Hypotheses state={memory.short_term.hypotheses} />
-      <h3>Long-term · Across your sessions</h3>
-      <h4>Estimated mastery</h4><ul>{Object.entries(memory.long_term.mastery).map(([concept,value])=><li key={concept}>{concept}: {Math.round(value*100)}%</li>)}</ul>
-      <h4>Your learning goals</h4>{items('student_goal')}
-      {editing==='new' ? editor() : <button type="button" onClick={()=>{setEditing('new');setText('');}}>Add learning goal</button>}
-      <h4>Suggested next goals</h4>{items('agent_goal')}
-      <h4>Saved reflections</h4>{items('summary')}
-      <h4>Assessed learning hypotheses</h4><Hypotheses state={{status:'ready',items:memory.long_term.hypotheses,origin:'submission'}} />
-      <h3>Possible misconceptions</h3><p>These are provisional observations. Add a dispute if the evidence misrepresents your understanding.</p>{items('misconception')}
-    </>}
+    {!memory && !error && <p role="status">Loading memory…</p>}
+    {memory && !hasMemory && <p className="muted">No long-term learning memory yet.</p>}
+    {memory && hasMemory && <div className="memory-table-wrap">
+      <table className="memory-table">
+        <caption>Long-term memory across your study sessions</caption>
+        <thead><tr>
+          <th scope="col">Concept</th>
+          <th scope="col">What the tutor remembers</th>
+          <th scope="col">Suggested next step</th>
+        </tr></thead>
+        <tbody>
+          {rows.map(row => <tr key={row.name}>
+            <th scope="row">
+              {row.name}
+              {row.mastery !== undefined && <span className="memory-mastery">{Math.round(row.mastery * 100)}% estimated mastery</span>}
+            </th>
+            <td>
+              {row.summary && <p>{row.summary}</p>}
+              {row.gaps.length > 0 && <ul>{row.gaps.map((gap, index) =>
+                <li key={index}>Possible gap · {gap}</li>
+              )}</ul>}
+              {!row.summary && !row.gaps.length && <span className="muted">—</span>}
+            </td>
+            <td>{row.nextGoal || <span className="muted">—</span>}</td>
+          </tr>)}
+        </tbody>
+        {(profile || goals.length > 0) && <tfoot>
+          {profile && <tr><th scope="row">Learner profile</th><td colSpan={2}>{profile}</td></tr>}
+          {goals.length > 0 && <tr><th scope="row">Your goals</th><td colSpan={2}>
+            <ul>{goals.map((goal, index) => <li key={index}>{goal}</li>)}</ul>
+          </td></tr>}
+        </tfoot>}
+      </table>
+    </div>}
   </section>;
 }

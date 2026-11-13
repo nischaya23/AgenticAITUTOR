@@ -7,9 +7,9 @@ from .logging_setup import event as log_event
 from .db import Event, Session, append_event
 
 
-def context_for(db, session_id: int, query: str = '') -> dict:
+def context_for(db, session_id: int, query: str = '', role: str = 'teaching') -> dict:
     from .context import for_session
-    return for_session(db, session_id, query)
+    return for_session(db, session_id, query, role)
 
 
 def persist_observation(db, row, state: dict, kind: str, data: dict):
@@ -76,7 +76,8 @@ def _ingest(db, session_id: int, event: utils.ClientEvent) -> dict:
     if event.type == 'session_end':
         state['ended'] = True
     received_at = utils.now()
-    entry = append_event(db, session_id, event.type, {**data, 'revision': state['revision'], 'received_at': received_at})
+    entry = append_event(db, session_id, event.type, {**data, 'revision': state['revision'],
+        'received_at': received_at, 'concept': state['current_concept']})
     if draft_changed:
         state['last_draft_event_id'] = entry.id
     if event.type == 'problem_attempt':
@@ -137,7 +138,8 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
             return None
         snapshot = state['revision']
         needs_plan = not state.get('plan', {}).get('steps')
-    plan = await planner.create_learning_plan(context) if needs_plan else context['plan']
+        planning_context = context_for(db, sid, job['content'], role='planning') if needs_plan else None
+    plan = await planner.create_learning_plan(planning_context) if needs_plan else context['plan']
     context['plan'] = plan
     from . import research, knowledge
     from . import operations
@@ -182,7 +184,7 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
                                            'result': result})
         entry = append_event(db, sid, 'intervention', {**result, 'proactive': not explicit,
                              'trigger_event_id': job['event_id'], 'revision': current['revision'],
-                             'problem_id': current['current_problem']['id']})
+                             'problem_id': current['current_problem']['id'], 'concept': job['concept']})
         o = current['observer']
         o['last_intervention_at'] = utils.now()
         previous = o.pop('pending_intervention', None)
@@ -196,10 +198,6 @@ async def _deliver_intervention(job: dict, explicit: bool) -> dict | None:
             current['plan'] = plan
             current['plan_version'] = current.get('plan_version', 0)+1
         memory.update_short_term_memory(db, sid, current)
-        if needs_plan:
-            model = memory.get_long_term_memory(db, row.user_id)
-            memory.update_long_term_memory(db, row.user_id,
-                {'learning_goals': list(dict.fromkeys(model['learning_goals'] + plan['learning_goals']))[-10:]})
         utils.METRICS['interventions'] += 1
         utils.METRICS['proactive_interventions' if not explicit else 'explicit_interventions'] += 1
         return {'type': 'intervention', 'event_id': entry.id, 'proactive': not explicit,
@@ -218,7 +216,7 @@ async def _assess(job):
         # The submission snapshot is authoritative even if the student continues editing.
         context.update(response=job['response'], workspace=job['response']['text'])
         context['snapshot']['response_revision'] = job['response_revision']
-        prior = hypothesis.eligible(state)
+        prior = context['hypotheses']
     result = await assessment.evaluate_attempt(job['problem'],
         job['response'] if job['unified'] else job['content'], context,
         job.get('assessment_mode') == 'reasoning')
@@ -229,7 +227,7 @@ async def _assess(job):
             workflow.outcome('discarded', 'Submission question or plan changed', db=db)
             return []
         entry = append_event(db, sid, 'assessment', {**result, 'trigger_event_id': job['event_id'],
-            'response': job['response'], 'response_revision': job['response_revision']})
+            'response': job['response'], 'response_revision': job['response_revision'], 'concept': job['concept']})
         evidence_id = entry.id
         student_model.update_mastery(db, row.user_id, job['concept'], result['score'], entry.id, result['verified'])
         student_model.update_misconceptions(db, row.user_id, job['concept'], assessment.diagnose_misconception(result), entry.id)
@@ -265,8 +263,10 @@ async def _assess(job):
             return [{'type': 'assessment', 'event_id': evidence_id, 'result': result}]
         if summary:
             model = memory.get_long_term_memory(db, row.user_id)
-            memory.update_long_term_memory(db, row.user_id, {'memories': model['memories']+[summary['summary']],
-                'learning_goals': [summary['next_goal']]}, evidence_id=evidence_id)
+            memory.record_concept_reflection(model, job['concept'], summary.get('concept_summary') or summary['summary'], summary['next_goal'],
+                state.get('material_id'), evidence_id, summary.get('profile_note', ''))
+            memory.update_long_term_memory(db, row.user_id, {'concept_memory': model['concept_memory'],
+                'learner_profile': model['learner_profile']}, evidence_id=evidence_id)
             append_event(db, sid, 'reflection', {**summary, 'scope': 'answer', 'tentative': not result['verified'], 'evidence_event_id': evidence_id})
         state['assessment_stages'] = {'reflection': 'ready' if summary else 'unavailable', 'hypotheses': 'analyzing'}
         memory.update_short_term_memory(db, sid, state)
@@ -281,7 +281,7 @@ async def _assess(job):
     except Exception as exc:
         log_event('hypothesis.failed', session_id=sid, origin='submission', error=type(exc).__name__)
         workflow.record('hypothesis.fallback', 'errors', 'warnings', message='Submission hypothesis analysis unavailable; prior hypotheses retained')
-        items, status, error = state.get('assessed_hypotheses', []), 'unavailable', 'Submission analysis unavailable; using prior hypotheses.'
+        items, status, error = context['student']['hypotheses'], 'unavailable', 'Submission analysis unavailable; using prior hypotheses.'
     with SessionLocal.begin() as db:
         row = db.get(Session, sid)
         state = deepcopy(row.state)
@@ -291,14 +291,17 @@ async def _assess(job):
             log_event('hypothesis.discarded', session_id=sid, origin='submission')
             return [{'type': 'assessment', 'event_id': evidence_id, 'result': result}]
         snapshot = {**state, 'response_revision': job['response_revision']}
-        panel = hypothesis.panel_for(snapshot, items, 'submission', status, error=error)
+        panel = hypothesis.panel_for(snapshot, items, 'submission', status,
+                                     concept_scope=context['hypothesis_scope'], error=error)
         state.update(hypothesis_state=panel, assessment_pending=False,
             assessment_stages={'reflection': 'ready' if summary else 'unavailable', 'hypotheses': status})
         if status == 'ready':
-            state['assessed_hypotheses'] = items
             state['assessed_hypothesis_version'] = panel['version']
+            items = panel['items']
             workflow.version_artifact('hypotheses', items, panel['version'], 'produced', db=db)
-            memory.update_long_term_memory(db, row.user_id, {'hypotheses': items})
+            student = memory.get_long_term_memory(db, row.user_id)
+            saved = memory.merge_assessed_hypotheses(student['hypotheses'], job['concept'], items)
+            memory.update_long_term_memory(db, row.user_id, {'hypotheses': saved})
             append_event(db, sid, 'hypotheses', {'items': items, 'evidence_event_id': evidence_id,
                 'question_id': panel['question_id'], 'plan_version': panel['plan_version']})
         memory.update_short_term_memory(db, sid, state)
@@ -330,7 +333,7 @@ async def _handle(job: dict) -> list[dict]:
         outputs.extend(await _assess(job))
     if job['replan']:
         with SessionLocal() as db:
-            context = context_for(db, sid)
+            context = context_for(db, sid, role='planning')
             revision = db.get(Session, sid).state['revision']
         plan = await planner.revise_plan(context)
         with SessionLocal.begin() as db:

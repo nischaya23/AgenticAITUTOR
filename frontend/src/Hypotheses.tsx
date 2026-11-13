@@ -8,7 +8,7 @@ export default function Hypotheses({ state }: { state?: HypothesisState }) {
       : state?.status === 'stale' ? 'Response, question, or plan changed. Previous hypotheses may be stale.'
       : state?.status === 'unavailable' ? state.error ?? 'Analysis unavailable. Previous hypotheses are shown.'
       : state?.items.length ? 'Possible gaps to explore' : 'No possible knowledge gaps identified yet.'}</p>
-    <ul>{state?.items.map(item => <li key={item.id}>
+    <ul>{state?.items.map(item => <li key={item.concept + ':' + item.id}>
       <strong>{item.possible_gap}</strong><p>{item.concept} · {Math.round(item.confidence * 100)}% confidence · {item.status}</p>
       <ul>{item.evidence.map((e, i) => <li key={i}>{e.summary} <small>({e.reference})</small></li>)}</ul>
       <p>Next focus: {item.diagnostic_focus}</p>
