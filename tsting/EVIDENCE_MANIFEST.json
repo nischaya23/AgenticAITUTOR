@@ -1,0 +1,132 @@
+{
+  "experiment_date": "2026-11-13",
+  "export_note": "Raw results/reports and included application transcripts copied byte for byte from the original isolated evaluation. Consolidated report regenerated with repository-relative paths. Harness made portable; its post-pilot grader separation was not used for archived live data.",
+  "excluded_artifacts": [
+    "databases and sidecars",
+    "raw backend/provider logs",
+    "material storage",
+    "credentials and environment files",
+    "Python caches",
+    "redundant preliminary offline runs"
+  ],
+  "runs": [
+    {
+      "run_id": "20261113-211454-live-bb4684",
+      "purpose": "Paced live run, stopped for user time limit",
+      "included_in_combined_live_metrics": true,
+      "mode": "live",
+      "model": "gemini-3.5-flash-lite",
+      "seed": 23,
+      "tested_revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+      "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+      "graded_answers_before_inspection": 4,
+      "files": [
+        {
+          "path": "evidence/runs/20261113-211454-live-bb4684/results.json",
+          "sha256": "5c9cd138b168a5e1ba9613e15b22e40e372d8ad5c5ad20855beb8bea91e082e8",
+          "bytes": 32330,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-211454-live-bb4684/report.md",
+          "sha256": "bd4632731bb50a7d772179e45f4eba871a76a478f1b8c189483da8a4db65b98d",
+          "bytes": 4126,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-211454-live-bb4684/transcript.jsonl",
+          "sha256": "1d969b12154641877db801495d4bbe958e0be9cbe0435e5ba75c36cb4748cebe",
+          "bytes": 214607,
+          "matches_original": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261113-212045-live-9f1a92",
+      "purpose": "Abbreviated live comparison, soft time-budget stop",
+      "included_in_combined_live_metrics": true,
+      "mode": "live",
+      "model": "gemini-3.5-flash-lite",
+      "seed": 23,
+      "tested_revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+      "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+      "graded_answers_before_inspection": 9,
+      "files": [
+        {
+          "path": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+          "sha256": "de9c2cf5b62821e1339a0058d83a6432a02cb934aeee93aa412d0a5460d63862",
+          "bytes": 47772,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-212045-live-9f1a92/report.md",
+          "sha256": "89314885388f424d463ed88e0650e3ae975a80147c4d60a034b2ece9682056f2",
+          "bytes": 5290,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-212045-live-9f1a92/transcript.jsonl",
+          "sha256": "22d193f1edffc1503512e935a598192c9f69ea9a31974a85ea636cdb565c63df",
+          "bytes": 274342,
+          "matches_original": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261113-210946-offline-3e18e2",
+      "purpose": "Full synthetic harness validation; not live performance",
+      "included_in_combined_live_metrics": false,
+      "mode": "offline",
+      "model": "gpt-4o",
+      "seed": 23,
+      "tested_revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+      "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+      "graded_answers_before_inspection": 26,
+      "files": [
+        {
+          "path": "evidence/runs/20261113-210946-offline-3e18e2/results.json",
+          "sha256": "6b554ce0ea772d05de84ae7acb8b9272d57bc76799d8491cc0f48fb868810c07",
+          "bytes": 81535,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-210946-offline-3e18e2/report.md",
+          "sha256": "d99d1164173eef4d6dee5c5d36f1db421c8f4cb632641bfeb5beac457716cc18",
+          "bytes": 2508,
+          "matches_original": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261113-211009-live-125648",
+      "purpose": "Unpaced quota-limited attempt; excluded from combined analysis",
+      "included_in_combined_live_metrics": false,
+      "mode": "live",
+      "model": "gemini-3.5-flash-lite",
+      "seed": 23,
+      "tested_revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+      "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+      "graded_answers_before_inspection": 1,
+      "files": [
+        {
+          "path": "evidence/runs/20261113-211009-live-125648/results.json",
+          "sha256": "329831b9d6564129478702c854cd8789030e6849db1e1cb9233223ef9994a71a",
+          "bytes": 23814,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-211009-live-125648/report.md",
+          "sha256": "dcc954c8a3f36c22516142bebe83dffc77ed8955f48b506e7d8772387a32e5f5",
+          "bytes": 3089,
+          "matches_original": true
+        },
+        {
+          "path": "evidence/runs/20261113-211009-live-125648/transcript.jsonl",
+          "sha256": "43c789a8aadf5ae39c99f1018d50fdd93c9fc98ef35ff4314707d1c4891b15cb",
+          "bytes": 70359,
+          "matches_original": true
+        }
+      ]
+    }
+  ]
+}

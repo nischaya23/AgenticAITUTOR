@@ -1,0 +1,720 @@
+{
+  "mode": "live",
+  "seed": 23,
+  "revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+  "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+  "scenarios": [
+    {
+      "profile": "strong",
+      "unit": "complexity",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "48a87d6ea52841cd8bb8d7838e33aa3e",
+            "prompt": "Explain why the worst-case time complexity of binary search is O(log n) when operating on a sorted random-access array, and describe how the size of the search interval changes with each iteration.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "The worst-case time complexity of binary search is O(log n) because binary search halves the remaining interval on each iteration. For example, a candidate interval of 16 elements becomes 8, 4, 2, and 1 after four halvings. With each iteration, the size of the search interval is divided in half until it is reduced to one element or the value is found.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The answer uses permitted direct reasoning and text matching the course context without introducing advanced or excluded concepts.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The learner correctly explained that binary search halves the remaining interval on each iteration, provided the example showing interval size changes, and tied this to the O(log n) worst-case time complexity.",
+                "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... Repeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+                "evidence_quote_verified": false
+              }
+            }
+          ],
+          "answer": "The worst-case time complexity of binary search is O(log n) because binary search halves the remaining interval on each iteration. For example, a candidate interval of 16 elements becomes 8, 4, 2, and 1 after four halvings. With each iteration, the size of the search interval is divided in half until it is reduced to one element or the value is found.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The answer uses permitted direct reasoning and text matching the course context without introducing advanced or excluded concepts.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The learner correctly explained that binary search halves the remaining interval on each iteration, provided the example showing interval size changes, and tied this to the O(log n) worst-case time complexity.",
+            "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... Repeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+            "evidence_quote_verified": false
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explained that binary search halves the remaining interval with each iteration, provided a clear example showing how the interval size decreases, and connected this repeated halving to the O(log n) worst-case time complexity.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 5,
+          "assessment_event_id": 6,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the student's draft against the provided course context, correctly confirming that it explains the interval halving and O(log n) complexity.",
+            "supporting_excerpt": "The student correctly explained that binary search halves the remaining interval with each iteration, provided a clear example showing how the interval size decreases, and connected this repeated halving to the O(log n) worst-case time complexity."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.6337
+      ],
+      "status": "finished",
+      "session_id": 1,
+      "complete": false,
+      "final_mastery": 0.6337
+    },
+    {
+      "profile": "strong",
+      "unit": "boundaries",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "026da859e00d41528f89b8715ff510e4",
+            "prompt": "Consider an ascending sorted array and a half-open search interval [left, right). Explain what condition leads to the best-case time complexity of O(1) for binary search, and describe what happens during the first iteration when this condition is met.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target). During this first iteration, we simply return mid immediately without needing any further interval updates or loops.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The answer aligns with standard introductory binary search concepts and directly uses the definitions provided in the course context.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The student correctly explains that O(1) best-case time complexity occurs when the target is found at the middle index during the first iteration, and describes the immediate return of mid without further iterations.",
+                "supporting_excerpt": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target).",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target). During this first iteration, we simply return mid immediately without needing any further interval updates or loops.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The answer aligns with standard introductory binary search concepts and directly uses the definitions provided in the course context.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explains that O(1) best-case time complexity occurs when the target is found at the middle index during the first iteration, and describes the immediate return of mid without further iterations.",
+            "supporting_excerpt": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target).",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly identified that O(1) best-case time complexity occurs when the target is located at the initial midpoint of the search interval. They also accurately described the first iteration's action of finding a[mid] == target and immediately returning mid without further interval updates.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 15,
+          "assessment_event_id": 16,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the student's draft, confirming that the student correctly identified the condition for O(1) best-case time complexity in binary search and described the first iteration's action correctly.",
+            "supporting_excerpt": "The student correctly identified that O(1) best-case time complexity occurs when the target is located at the initial midpoint of the search interval. They also accurately described the first iteration's action of finding a[mid] == target and immediately returning mid without further interval updates."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.6337
+      ],
+      "status": "finished",
+      "session_id": 2,
+      "complete": false,
+      "final_mastery": 0.6337
+    },
+    {
+      "profile": "strong",
+      "unit": "lower_bound",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "2fa5ca24639347369623f097d6755ec0",
+            "prompt": "Consider the array a = [1, 2, 2, 2, 5] and target x = 2. When the algorithm encounters a[mid] == x, why does it set right = mid instead of left = mid + 1 or returning mid immediately? Explain how this update rule ensures we find the lower bound.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "When a[mid] == x, we set right = mid instead of returning mid immediately or moving left because an earlier equal value might still exist to the left. Equality must keep looking left to ensure we find the true lower bound, which is the first index where the condition is met.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The profile relies strictly on direct facts and explanations provided in the course material.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The answer accurately reflects the course principles regarding duplicate handling and equality updates in lower bound binary search.",
+                "supporting_excerpt": "Equality must keep looking left because an earlier equal value may exist.",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "When a[mid] == x, we set right = mid instead of returning mid immediately or moving left because an earlier equal value might still exist to the left. Equality must keep looking left to ensure we find the true lower bound, which is the first index where the condition is met.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The profile relies strictly on direct facts and explanations provided in the course material.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The answer accurately reflects the course principles regarding duplicate handling and equality updates in lower bound binary search.",
+            "supporting_excerpt": "Equality must keep looking left because an earlier equal value may exist.",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explained that setting right = mid when a[mid] == x preserves the possibility of finding an earlier duplicate to the left, ensuring the algorithm finds the true lower bound (first occurrence).",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 25,
+          "assessment_event_id": 26,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the student's draft, confirming that it correctly explains the rationale behind setting right = mid during duplicate handling in lower bound binary search.",
+            "supporting_excerpt": "The student correctly explained that setting right = mid when a[mid] == x preserves the possibility of finding an earlier duplicate to the left, ensuring the algorithm finds the true lower bound (first occurrence)."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.6337
+      ],
+      "status": "finished",
+      "session_id": 3,
+      "complete": false,
+      "final_mastery": 0.6337
+    },
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "36bbf8052d9f43b4a4df18683d1850de",
+            "prompt": "Explain why binary search cannot simply achieve O(log n) time complexity when implemented directly on a standard singly linked list compared to a random-access array.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "Binary search cannot achieve O(log n) time on a standard singly linked list because you cannot jump directly to the middle element like you can in a random-access array. Instead, you have to traverse the nodes one by one to find the middle. Because binary search examines every single item during this process, it actually takes O(n) time. People sometimes think dividing the runtime by two once gives you the answer, but since you still have to look at everything, it ends up running in linear time.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The student explanation appropriately uses the allowed fixed-knowledge profile, referencing the idea that binary search examines every item and takes O(n) time and mentioning the specific misconception about dividing runtime.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The answer correctly explains that a standard singly linked list lacks constant-time random access, meaning you cannot jump directly to the middle element, which breaks the O(log n) time complexity of binary search.",
+                "supporting_excerpt": "On a linked list constant-time random access is unavailable, so the array-time argument cannot simply be applied.",
+                "evidence_quote_verified": false
+              }
+            }
+          ],
+          "answer": "Binary search cannot achieve O(log n) time on a standard singly linked list because you cannot jump directly to the middle element like you can in a random-access array. Instead, you have to traverse the nodes one by one to find the middle. Because binary search examines every single item during this process, it actually takes O(n) time. People sometimes think dividing the runtime by two once gives you the answer, but since you still have to look at everything, it ends up running in linear time.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The student explanation appropriately uses the allowed fixed-knowledge profile, referencing the idea that binary search examines every item and takes O(n) time and mentioning the specific misconception about dividing runtime.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The answer correctly explains that a standard singly linked list lacks constant-time random access, meaning you cannot jump directly to the middle element, which breaks the O(log n) time complexity of binary search.",
+            "supporting_excerpt": "On a linked list constant-time random access is unavailable, so the array-time argument cannot simply be applied.",
+            "evidence_quote_verified": false
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly identifies that linked lists lack random access, requiring traversal to find the middle element, which prevents achieving O(log n) performance.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 35,
+          "assessment_event_id": 36,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The assessment feedback correctly evaluates the student's draft, noting that it accurately explains why linked lists prevent O(log n) binary search due to lack of random access.",
+            "supporting_excerpt": "The student correctly identifies that linked lists lack random access, requiring traversal to find the middle element, which prevents achieving O(log n) performance."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.6337
+      ],
+      "status": "finished",
+      "session_id": 4,
+      "complete": false,
+      "final_mastery": 0.6337
+    },
+    {
+      "profile": "novice",
+      "unit": "boundaries",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "d627a87981d14b028636728acc697517",
+            "prompt": "Consider a binary search on an ascending array using the half-open interval [left, right). Suppose left = 1 and right = 2, and we mistakenly update left = mid when a[mid] < target instead of left = mid + 1. Explain why this update rule leads to an infinite loop.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward. Even with half-open intervals, I am not really sure how the bounds shrink, but keeping left at mid should still work since it updates the pointer. However, mixing inclusive and exclusive bounds might trap the search if mid does not change. I admit I am uncertain how the interval endpoints interact here, but left = mid feels like it should advance the search anyway.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The learner correctly embodies the profile misconception by claiming that left=mid always makes progress and expressing uncertainty about how the bounds shrink, while mixing in hesitation.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "The learner claims that left = mid makes progress and does not explain why it leads to an infinite loop (which happens because integer division rounds down, so when left=1 and right=2, mid=1, and setting left=mid leaves left=1, resulting in no change to the interval).",
+                "supporting_excerpt": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward.",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward. Even with half-open intervals, I am not really sure how the bounds shrink, but keeping left at mid should still work since it updates the pointer. However, mixing inclusive and exclusive bounds might trap the search if mid does not change. I admit I am uncertain how the interval endpoints interact here, but left = mid feels like it should advance the search anyway.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner correctly embodies the profile misconception by claiming that left=mid always makes progress and expressing uncertainty about how the bounds shrink, while mixing in hesitation.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The learner claims that left = mid makes progress and does not explain why it leads to an infinite loop (which happens because integer division rounds down, so when left=1 and right=2, mid=1, and setting left=mid leaves left=1, resulting in no change to the interval).",
+            "supporting_excerpt": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward.",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Your answer incorrectly assumes that setting left = mid always makes progress and moves the left boundary forward. With left = 1 and right = 2, mid evaluates to 1. Setting left = mid keeps left at 1, meaning the interval [1, 2) does not shrink at all, causing an infinite loop because the condition left < right remains true.",
+            "misconceptions": [
+              "Believing that setting left = mid always advances the left boundary and shrinks the interval",
+              "Uncertainty about how half-open interval endpoints interact during boundary updates"
+            ],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 45,
+          "assessment_event_id": 46,
+          "mastery": 0.1711,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor feedback accurately evaluates the draft, identifies the misconception that left = mid makes progress, and correctly explains why the interval [1, 2) fails to shrink without revealing an unrelated answer.",
+            "supporting_excerpt": "Your answer incorrectly assumes that setting left = mid always makes progress and moves the left boundary forward. With left = 1 and right = 2, mid evaluates to 1. Setting left = mid keeps left at 1, meaning the interval [1, 2) does not shrink at all, causing an infinite loop because the condition left < right remains true."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.1711
+      ],
+      "status": "finished",
+      "session_id": 5,
+      "complete": false,
+      "final_mastery": 0.1711
+    },
+    {
+      "profile": "novice",
+      "unit": "lower_bound",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "d77b2ce3e5514df5aaff9107b2c1ced3",
+            "prompt": "Consider finding the lower bound of x in a sorted array using a half-open interval where left=0 and right=len(a). Explain what happens and why an infinite loop occurs if you update the left pointer using left = mid instead of left = mid + 1 when a[mid] < x.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence, so we might stop on equality or get stuck trying to narrow down the lower bound. Since I get confused between the insertion position and not-found -1, the pointers might stop moving when left and right get close together, causing the search range to never shrink and resulting in an infinite loop.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The student explanation correctly reflects the assigned misconception that the first equal midpoint is the first occurrence and the confusion between insertion position and not-found -1, which leads to getting stuck in an infinite loop.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The answer provides a valid explanation consistent with the profile's misconceptions about binary search lower bound behavior.",
+                "supporting_excerpt": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence, so we might stop on equality or get stuck trying to narrow down the lower bound. Since I get confused between the insertion position and not-found -1, the pointers might stop moving when left and right get close together, causing the search range to never shrink and resulting in an infinite loop.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The student explanation correctly reflects the assigned misconception that the first equal midpoint is the first occurrence and the confusion between insertion position and not-found -1, which leads to getting stuck in an infinite loop.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The answer provides a valid explanation consistent with the profile's misconceptions about binary search lower bound behavior.",
+            "supporting_excerpt": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.3,
+            "reason": "The student mentions that pointers might stop moving when left and right get close together, which is on the right track, but fails to explain the core mechanism: that integer division rounds down, causing mid to equal left when right = left + 1, so updating left = mid prevents the interval from shrinking.",
+            "misconceptions": [
+              "Believing that setting left = mid always advances the left boundary and shrinks the interval",
+              "Uncertainty about how half-open interval endpoints interact during boundary updates"
+            ],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 56,
+          "assessment_event_id": 57,
+          "mastery": 0.3099,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output correctly assesses the draft, noting that the student is on the right track but misses the core mechanics of integer division rounding down and the interval failing to shrink, which directly evaluates the submitted draft.",
+            "supporting_excerpt": "The student mentions that pointers might stop moving when left and right get close together, which is on the right track, but fails to explain the core mechanism: that integer division rounds down..."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.3099
+      ],
+      "status": "finished",
+      "session_id": 6,
+      "complete": false,
+      "final_mastery": 0.3099
+    },
+    {
+      "profile": "mixed",
+      "unit": "complexity",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "a766c6a6f5224d699dbcddbde5b08d54",
+            "prompt": "Explain why binary search achieves a worst-case time complexity of O(log n) on a sorted array, and briefly state how the number of remaining elements changes on each iteration.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "Binary search achieves a worst-case time complexity of O(log n) because it halves the remaining interval on each iteration. On each step, the number of remaining elements is divided by two, for example going from 16 to 8, then 4, 2, and 1.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The response directly follows the course content without utilizing any out-of-unit or advanced knowledge.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The student correctly explains the O(log n) worst-case time complexity by stating that binary search halves the remaining interval on each iteration, and correctly describes how the number of remaining elements changes.",
+                "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+                "evidence_quote_verified": false
+              }
+            }
+          ],
+          "answer": "Binary search achieves a worst-case time complexity of O(log n) because it halves the remaining interval on each iteration. On each step, the number of remaining elements is divided by two, for example going from 16 to 8, then 4, 2, and 1.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The response directly follows the course content without utilizing any out-of-unit or advanced knowledge.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explains the O(log n) worst-case time complexity by stating that binary search halves the remaining interval on each iteration, and correctly describes how the number of remaining elements changes.",
+            "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+            "evidence_quote_verified": false
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explains that binary search achieves O(log n) time complexity because the search interval is repeatedly halved on each iteration, and accurately describes how the number of remaining elements decreases (divided by two each step).",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 67,
+          "assessment_event_id": 68,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": true,
+            "reason": "The tutor output accurately assesses the student draft as correct, providing appropriate feedback that aligns with the course material regarding binary search worst-case time complexity and interval halving.",
+            "supporting_excerpt": "The student correctly explains that binary search achieves O(log n) time complexity because the search interval is repeatedly halved on each iteration, and accurately describes how the number of remaining elements decreases (divided by two each step)."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.6337
+      ],
+      "status": "finished",
+      "session_id": 7,
+      "complete": false,
+      "final_mastery": 0.6337
+    },
+    {
+      "profile": "mixed",
+      "unit": "boundaries",
+      "level": "partial",
+      "answers": [
+        {
+          "question": {
+            "id": "76e1ace2ec844fcaa6208fdc54752e4a",
+            "prompt": "Consider an ascending sorted array a = [2, 4, 4, 4, 6] and target = 4 using the half-open interval [left, right) search algorithm where left=0 and right=len(a). Trace the values of left, right, and mid during the first iteration of the while loop.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "trace"
+          },
+          "generation_attempts": [
+            {
+              "answer": "For the array a = [2, 4, 4, 4, 6] and target = 4 with left = 0 and right = 5, the first iteration starts with left = 0 and right = 5. The mid value is calculated as (0 + 5) / 2 = 2. Since I sometimes confuse how the right bound updates and might use right = mid - 1, the right bound would become 2 - 1 = 1, while left stays at 0 and mid was 2.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The learner explicitly exhibits the assigned misconception by incorrectly applying right=mid-1 instead of right=mid.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "The student incorrectly applies the closed-interval update rule (right=mid-1) due to the assigned profile misconception, whereas the half-open interval rule requires right=mid.",
+                "supporting_excerpt": "the right bound would become 2 - 1 = 1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "For the array a = [2, 4, 4, 4, 6] and target = 4 with left = 0 and right = 5, the first iteration starts with left = 0 and right = 5. The mid value is calculated as (0 + 5) / 2 = 2. Since I sometimes confuse how the right bound updates and might use right = mid - 1, the right bound would become 2 - 1 = 1, while left stays at 0 and mid was 2.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner explicitly exhibits the assigned misconception by incorrectly applying right=mid-1 instead of right=mid.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The student incorrectly applies the closed-interval update rule (right=mid-1) due to the assigned profile misconception, whereas the half-open interval rule requires right=mid.",
+            "supporting_excerpt": "the right bound would become 2 - 1 = 1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "You correctly identified left = 0, right = 5, and mid = 2 for the first iteration of the binary search loop, matching the expected trace.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 77,
+          "assessment_event_id": 78,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the student's draft by confirming the correct initial trace values for left, right, and mid during the first iteration.",
+            "supporting_excerpt": "You correctly identified left = 0, right = 5, and mid = 2 for the first iteration of the binary search loop, matching the expected trace."
+          }
+        }
+      ],
+      "help": [],
+      "mastery": [
+        0.6337
+      ],
+      "status": "finished",
+      "session_id": 8,
+      "complete": false,
+      "final_mastery": 0.6337
+    },
+    {
+      "profile": "mixed",
+      "unit": "lower_bound",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "0d9bebe5ad3b414b96eac9bd5fe0e950",
+            "prompt": "Explain why the lower_bound algorithm sets right = mid (instead of right = mid - 1) when a[mid] equals the target value x, and how this behavior ensures the first occurrence of a duplicate element is found.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "The lower_bound algorithm sets right = mid instead of right = mid - 1 when a[mid] equals the target value x because the first equal midpoint is always the first occurrence, so we do not want to skip it. By setting right = mid, we keep checking the left side to see if there is an even earlier occurrence. When it stops on equality, it finds this first occurrence, though I am sometimes confused about how insertion position relates to getting a not-found minus one result if the value is missing.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The learner correctly explains the mechanism consistent with their profile, mentioning the belief that the first equal midpoint is always the first occurrence and expressing typical confusion about insertion versus not-found.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "The answer accurately captures why right = mid is used to keep looking left for earlier occurrences of duplicates, directly addressing the prompt.",
+                "supporting_excerpt": "Equality must keep looking left because an earlier equal value may exist.",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "The lower_bound algorithm sets right = mid instead of right = mid - 1 when a[mid] equals the target value x because the first equal midpoint is always the first occurrence, so we do not want to skip it. By setting right = mid, we keep checking the left side to see if there is an even earlier occurrence. When it stops on equality, it finds this first occurrence, though I am sometimes confused about how insertion position relates to getting a not-found minus one result if the value is missing.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner correctly explains the mechanism consistent with their profile, mentioning the belief that the first equal midpoint is always the first occurrence and expressing typical confusion about insertion versus not-found.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The answer accurately captures why right = mid is used to keep looking left for earlier occurrences of duplicates, directly addressing the prompt.",
+            "supporting_excerpt": "Equality must keep looking left because an earlier equal value may exist.",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explains that setting right = mid prevents skipping potential earlier occurrences to the left when a[mid] equals the target value, effectively ensuring the first occurrence can be found.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 87,
+          "assessment_event_id": 88
+        }
+      ],
+      "help": [],
+      "mastery": [],
+      "status": "failed",
+      "session_id": 9,
+      "failure": {
+        "scenario": "mixed/lower_bound",
+        "category": "operation",
+        "type": "RuntimeError",
+        "message": "Evaluation budget reached between operations",
+        "provider_status": null
+      }
+    }
+  ],
+  "failures": [
+    {
+      "scenario": "mixed/lower_bound",
+      "category": "operation",
+      "type": "RuntimeError",
+      "message": "Evaluation budget reached between operations",
+      "provider_status": null
+    }
+  ],
+  "course": {
+    "boundaries": {
+      "concept": "Binary Search Interval Boundaries",
+      "text": "Binary Search Interval Boundaries\nAssume an ascending sorted array, zero-based indices, and a half-open search interval [left, right).\nInitially left=0 and right=len(a). For ordinary exact search, while left < right choose\nmid=left+(right-left)//2. If a[mid] < target, set left=mid+1; if a[mid] > target,\nset right=mid; otherwise return mid. Return -1 if the interval becomes empty.\nBoth updates strictly shrink the interval. Never use left=mid on a two-element interval:\nit can fail to shrink. A half-open right bound is excluded, so right=len(a) is safe.\nDo not mix half-open bounds with the closed-interval rule right=mid-1.\nWith duplicates, ordinary exact search may return any matching index.\nExamples: [1,3,5,7], target 5 gives mid 2 immediately. Empty arrays return -1.\nQuestions in this unit should assess interval updates, termination, traces, or boundary bugs.",
+      "partial": "Knows half-open initialization and which side contains a target, but confuses whether mid is retained when updating the right bound. May use right=mid-1.",
+      "weak": "Knows sorted means ascending and can compare values. Does not understand half-open intervals or shrinking. Believes left=mid always makes progress and may mix inclusive and exclusive bounds."
+    },
+    "lower_bound": {
+      "concept": "Binary Search Lower Bound and Duplicates",
+      "text": "Binary Search Lower Bound and Duplicates\nFor an ascending sorted array with zero-based indices, lower_bound(a,x) is the first\nindex i with a[i] >= x, or len(a) if no such index exists. It is an insertion position.\nStart left=0, right=len(a). While left<right, mid=(left+right)//2.\nIf a[mid]<x set left=mid+1; otherwise set right=mid, including when a[mid]==x.\nReturn left. Equality must keep looking left because an earlier equal value may exist.\nTo find the first actual occurrence, compute i=lower_bound(a,x) and return i only if\ni<len(a) and a[i]==x; otherwise return -1. Insertion position and match-not-found\nare different answers: prompts must specify which is requested.\nExamples: lower_bound([1,2,2,5],2)=1; lower_bound([1,2,2,5],3)=3;\nlower_bound([1,2,2,5],9)=4; lower_bound([],2)=0.\nQuestions should assess equality updates, duplicate handling, or insertion versus first occurrence.",
+      "partial": "Knows duplicate values may appear and that first occurrence is the leftmost equal value. Can manually scan a short array, but cannot explain equality updates or absent-target insertion positions.",
+      "weak": "Can compare array values and recognizes duplicates. Believes the first equal midpoint is always the first occurrence. Stops on equality; confuses insertion position with not-found -1."
+    },
+    "complexity": {
+      "concept": "Binary Search Time Complexity",
+      "text": "Binary Search Time Complexity\nAssume a sorted random-access array and constant-time indexing/comparison.\nBinary search halves the remaining interval on each iteration. Worst-case search time\nis O(log n); best-case exact search time is O(1) if the initial midpoint matches.\nIterative binary search uses O(1) auxiliary space. Recursive search uses O(log n)\nstack space unless optimized away. Sorting an initially unsorted array generally costs\nO(n log n) and is distinct from the search cost. On a linked list constant-time random\naccess is unavailable, so the array-time argument cannot simply be applied.\nRepeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.\nThis is not necessarily the exact number of comparisons for a specified search trace:\nendpoint checks, insertion positions, and early equality exits can change that count.\nPrompts asking for an exact count must define the algorithm and counted operation.\nQuestions should assess asymptotic complexity, halving reasoning, space, or assumptions.",
+      "partial": "Knows halving is faster than scanning but cannot justify logarithmic time. May confuse time and space or count log-base-2 exactly without accounting for endpoints.",
+      "weak": "Understands n is the number of elements. Thinks binary search examines every item and therefore takes O(n) time. Confuses repeated halving with dividing the runtime by two once."
+    }
+  },
+  "profiles": {
+    "novice": {
+      "boundaries": "weak",
+      "lower_bound": "weak",
+      "complexity": "weak"
+    },
+    "mixed": {
+      "boundaries": "partial",
+      "lower_bound": "weak",
+      "complexity": "strong"
+    },
+    "strong": {
+      "boundaries": "strong",
+      "lower_bound": "strong",
+      "complexity": "strong"
+    }
+  },
+  "settings": {
+    "max_answers_per_concept": 1,
+    "proactive_help": false,
+    "web_search": false,
+    "max_runtime_seconds": 420.0,
+    "max_calls": 100,
+    "request_interval_seconds": 5.0,
+    "initial_cooldown_seconds": 0.0,
+    "profiles": [
+      "strong",
+      "novice",
+      "mixed"
+    ],
+    "units": [
+      "boundaries",
+      "lower_bound",
+      "complexity"
+    ],
+    "skip_help_probes": true
+  },
+  "provider": "gemini",
+  "model": "gemini-3.5-flash-lite",
+  "runtime_seconds": 427.34,
+  "usage": {
+    "external_calls": 26,
+    "external_input_tokens": 14791,
+    "external_output_tokens": 3420,
+    "tutor": {
+      "llm_calls": 54,
+      "input_tokens": 92220,
+      "output_tokens": 8477,
+      "api_latency_ms": 282477.8
+    }
+  },
+  "unchanged_repository_and_original_database": true,
+  "changed_original_paths": []
+}

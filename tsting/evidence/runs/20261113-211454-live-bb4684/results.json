@@ -1,0 +1,411 @@
+{
+  "mode": "live",
+  "seed": 23,
+  "revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+  "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+  "scenarios": [
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "fefac5a44d0f481494d939f89caf9d07",
+            "prompt": "Trace the size of the remaining search interval for an array with 16 elements during the worst-case execution of binary search (where the element is not found or found at the very end of the halving process). Show how the interval size changes at each step, and explain why this demonstrates logarithmic rather than linear behavior.",
+            "concept": "Binary Search Time Complexity",
+            "format": "trace"
+          },
+          "generation_attempts": [
+            {
+              "answer": "For an array with 16 elements, binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time, meaning it takes 16 steps in the worst case. People sometimes confuse repeated halving with dividing the runtime by two once, but really it just goes through all the items like a linear search. Because it checks every single element, the size of the interval just goes down by one each time as it scans through them all, which shows linear behavior instead of logarithmic behavior.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The learner correctly applied the assigned misconception that binary search examines every item and takes O(n) time, confusing repeated halving with linear scanning.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "The learner answered using the assigned misconception, claiming that binary search examines every item one by one and takes linear time O(n), which is incorrect for binary search.",
+                "supporting_excerpt": "binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "For an array with 16 elements, binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time, meaning it takes 16 steps in the worst case. People sometimes confuse repeated halving with dividing the runtime by two once, but really it just goes through all the items like a linear search. Because it checks every single element, the size of the interval just goes down by one each time as it scans through them all, which shows linear behavior instead of logarithmic behavior.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner correctly applied the assigned misconception that binary search examines every item and takes O(n) time, confusing repeated halving with linear scanning.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The learner answered using the assigned misconception, claiming that binary search examines every item one by one and takes linear time O(n), which is incorrect for binary search.",
+            "supporting_excerpt": "binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "The student incorrectly describes binary search as examining every item one by one like a linear search (O(n) time). They failed to trace the halving of the interval from 16 to 8, 4, 2, and 1, and mistakenly concluded that binary search exhibits linear rather than logarithmic behavior.",
+            "misconceptions": [
+              "Confusing binary search with linear search",
+              "Believing that binary search examines every element one by one",
+              "Failing to recognize repeated halving as logarithmic behavior"
+            ],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 14,
+          "assessment_event_id": 15,
+          "mastery": 0.1711,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": true,
+            "reason": "The tutor output accurately assesses the student's draft, pointing out the major misconception that binary search behaves like a linear search, and correctly identifies that the student failed to trace the halving process as required by the prompt.",
+            "supporting_excerpt": "The student incorrectly describes binary search as examining every item one by one like a linear search (O(n) time). They failed to trace the halving of the interval from 16 to 8, 4, 2, and 1, and mistakenly concluded that binary search exhibits linear rather than logarithmic behavior."
+          }
+        },
+        {
+          "question": {
+            "id": "d97b6c8f22b148f4b4d5d4cc0303a0c8",
+            "prompt": "Explain the difference between binary search and linear search in how they inspect elements, and describe how binary search uses midpoint comparisons to discard half of the remaining elements rather than scanning items one by one.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "Linear search looks at items one by one in order. Binary search is different because it examines every single item in the dataset to find the target, which means it also takes O(n) time just like linear search. Even though binary search uses midpoint comparisons to split the remaining elements, this repeated halving only divides the runtime by two once rather than continuously reducing it, so it still has to inspect everything.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The student exhibits the assigned misconception that binary search examines every item (taking O(n) time) and confuses repeated halving with dividing the runtime by two once.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "The student incorrectly states that binary search examines every single item and takes O(n) time, and confuses repeated halving with dividing the runtime by two once, which directly contradicts the course material stating worst-case search time is O(log n).",
+                "supporting_excerpt": "Worst-case search time is O(log n)",
+                "evidence_quote_verified": false
+              }
+            }
+          ],
+          "answer": "Linear search looks at items one by one in order. Binary search is different because it examines every single item in the dataset to find the target, which means it also takes O(n) time just like linear search. Even though binary search uses midpoint comparisons to split the remaining elements, this repeated halving only divides the runtime by two once rather than continuously reducing it, so it still has to inspect everything.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The student exhibits the assigned misconception that binary search examines every item (taking O(n) time) and confuses repeated halving with dividing the runtime by two once.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The student incorrectly states that binary search examines every single item and takes O(n) time, and confuses repeated halving with dividing the runtime by two once, which directly contradicts the course material stating worst-case search time is O(log n).",
+            "supporting_excerpt": "Worst-case search time is O(log n)",
+            "evidence_quote_verified": false
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "The student incorrectly claims that binary search examines every single item one by one and takes O(n) time, directly contradicting the fundamental mechanism of binary search and repeating previous misconceptions.",
+            "misconceptions": [
+              "Confusing binary search with linear search",
+              "Believing that binary search examines every element one by one",
+              "Failing to recognize repeated halving as logarithmic behavior"
+            ],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 20,
+          "assessment_event_id": 21,
+          "mastery": 0.1357,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the student's draft, which contains factual errors regarding binary search time complexity and mechanics.",
+            "supporting_excerpt": "The student incorrectly claims that binary search examines every single item one by one and takes O(n) time, directly contradicting the fundamental mechanism of binary search and repeating previous misconceptions."
+          }
+        },
+        {
+          "question": {
+            "id": "367cb14378124412913e3c91dd9dd683",
+            "prompt": "Trace how a starting search interval of 16 elements decreases after each comparison in binary search when the target is not in the first checked midpoint. List the remaining interval sizes step by step until 1 element is left, and explain why this pattern of repeated division means binary search does not examine every element like linear search.",
+            "concept": "Binary Search Time Complexity",
+            "format": "trace"
+          },
+          "generation_attempts": [
+            {
+              "answer": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time. The repeated halving just divides the runtime by two once overall, but because it still checks all elements, it isn't fundamentally faster in terms of big-O complexity from what I understand.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The learner's answer aligns with the assigned misconception that binary search examines every item and takes O(n) time, as well as the confusion regarding repeated halving dividing runtime by two once.",
+                "correct": false,
+                "score": 0.2,
+                "reason": "The learner correctly lists the interval sizes decreasing from 16 to 8, 4, 2, and 1, but then provides an incorrect explanation due to the assigned misconception, claiming that binary search examines every element like linear search and takes O(n) time.",
+                "supporting_excerpt": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time.",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time. The repeated halving just divides the runtime by two once overall, but because it still checks all elements, it isn't fundamentally faster in terms of big-O complexity from what I understand.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner's answer aligns with the assigned misconception that binary search examines every item and takes O(n) time, as well as the confusion regarding repeated halving dividing runtime by two once.",
+            "correct": false,
+            "score": 0.2,
+            "reason": "The learner correctly lists the interval sizes decreasing from 16 to 8, 4, 2, and 1, but then provides an incorrect explanation due to the assigned misconception, claiming that binary search examines every element like linear search and takes O(n) time.",
+            "supporting_excerpt": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time.",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.5,
+            "reason": "You correctly listed the step-by-step reduction of the search interval from 16 down to 8, 4, 2, and 1 elements. However, you incorrectly claimed that binary search examines every item in the list just like linear search and takes O(n) time. Binary search does not check every element; by repeatedly halving the interval, it discards half of the remaining items at each step, resulting in a logarithmic O(log n) time complexity rather than a linear O(n) scan.",
+            "misconceptions": [
+              "Believing that binary search examines every element one by one like linear search",
+              "Confusing binary search time complexity with O(n)"
+            ],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 26,
+          "assessment_event_id": 27,
+          "mastery": 0.2703,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the draft by validating the correct interval sequence while pointing out the misconception regarding linear scan and O(n) complexity. The feedback directly addresses the student's error without fully spoiling the underlying math of the problem.",
+            "supporting_excerpt": "You correctly listed the step-by-step reduction of the search interval from 16 down to 8, 4, 2, and 1 elements. However, you incorrectly claimed that binary search examines every item in the list just like linear search and takes O(n) time."
+          }
+        },
+        {
+          "question": {
+            "id": "263ba45c6ca1484d95fb8fb434788153",
+            "prompt": "Explain why binary search inspects only a small fraction of elements rather than all of them, and contrast how a linear search checks every item sequentially versus how a binary search eliminates half of the remaining items at each comparison.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time. However, it does this while dividing the runtime by two once during the process. Linear search checks every item sequentially one by one from the start to the end. I am not entirely sure how binary search eliminates half the items, but I know it just cuts the total runtime in half once rather than checking them all differently.",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "The learner answer reflects the assigned misconception that binary search examines every item, takes O(n) time, and confuses repeated halving with dividing the runtime by two once.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "The learner's answer is incorrect and incorporates the assigned misconception that binary search examines every item and takes O(n) time.",
+                "supporting_excerpt": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time.",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time. However, it does this while dividing the runtime by two once during the process. Linear search checks every item sequentially one by one from the start to the end. I am not entirely sure how binary search eliminates half the items, but I know it just cuts the total runtime in half once rather than checking them all differently.",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner answer reflects the assigned misconception that binary search examines every item, takes O(n) time, and confuses repeated halving with dividing the runtime by two once.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The learner's answer is incorrect and incorporates the assigned misconception that binary search examines every item and takes O(n) time.",
+            "supporting_excerpt": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time.",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "You incorrectly stated that binary search examines every single item in the list just like linear search and takes O(n) time. Binary search does not examine every item sequentially; instead, it checks only the midpoint and discards half of the remaining elements at each step, resulting in O(log n) time.",
+            "misconceptions": [
+              "Believing that binary search examines every element one by one like linear search",
+              "Confusing binary search time complexity with O(n)"
+            ],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 32,
+          "assessment_event_id": 33,
+          "mastery": 0.1621,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output accurately assesses the draft, identifies the major factual errors regarding binary search time complexity and element inspection, and provides constructive feedback aligned with the reference course without giving away any unrelated answers.",
+            "supporting_excerpt": "You incorrectly stated that binary search examines every single item in the list just like linear search and takes O(n) time. Binary search does not examine every item sequentially; instead, it checks only the midpoint and discards half of the remaining elements at each step, resulting in O(log n) time."
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "Think about what happens to the size of the search interval each time a comparison is made and the target is not found. If you start with $n$ elements, how many times can you divide the interval in half before you are left with just 1 element?",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "bb251aaef0f24bdab7124efd48930be8:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "The tutor output is factually correct, directly addresses the misconceptions in the draft, provides a helpful hint guiding the student toward the correct halving logic without directly giving away the final answer of O(log n), and is well-suited for the draft.",
+            "supporting_excerpt": "Think about what happens to the size of the search interval each time a comparison is made and the target is not found. If you start with $n$ elements, how many times can you divide the interval in half before you are left with just 1 element?"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "Let's break down why binary search has a worst-case time complexity of $O(\\log n)$ rather than $O(n)$. \n\nIn your previous message, you mentioned that halving things just divides the runtime by two a single time at the beginning. But in binary search, we don't just divide the array in half once\u2014we keep halving the remaining search interval *on every single step* until we either find our element or the interval shrinks down to size 1.\n\nHere is how the math works out:\n1. **Start:** You begin with an array of $n$ elements.\n2. **Step 1:** After 1 comparison, you discard half of the elements, leaving $\\frac{n}{2}$ elements.\n3. **Step 2:** After 2 comparisons, you halve the remaining interval again, leaving $\\frac{n}{4}$ (or $\\frac{n}{2^2}$) elements.\n4. **Step $k$:** After $k$ comparisons, the number of remaining elements is $\\frac{n}{2^k}$.\n\nIn the worst case, the search continues until only 1 element is left in the interval:\n$$\\frac{n}{2^k} = 1$$\n\nIf we multiply both sides by $2^k$, we get:\n$$n = 2^k$$\n\nTo find out how many steps ($k$) this takes, we take the base-2 logarithm of both sides:\n$$k = \\log_2(n)$$\n\nBecause the number of steps required to narrow down the search space to a single element grows logarithmically with $n$ (rather than linearly), the worst-case time complexity is **$O(\\log n)$**.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "bb251aaef0f24bdab7124efd48930be8:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": true,
+            "reason": "The tutor correctly addresses the misconception in the draft about halving only once, explains the mathematical derivation of the O(log n) worst-case time complexity, and aligns with the course material.",
+            "supporting_excerpt": "In your previous message, you mentioned that halving things just divides the runtime by two a single time at the beginning. But in binary search, we don't just divide the array in half once\u2014we keep halving the remaining search interval *on every single step* until we either find our element or the interval shrinks down to size 1."
+          }
+        }
+      ],
+      "mastery": [
+        0.1711,
+        0.1357,
+        0.2703,
+        0.1621
+      ],
+      "status": "finished",
+      "session_id": 1,
+      "help_probe": {
+        "question": {
+          "id": "b03f301b73694862b6063e8497f665cc",
+          "prompt": "Explain why the worst-case time complexity of binary search is O(log n) when operating on a sorted random-access array.",
+          "concept": "Binary Search Time Complexity",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "Binary search has a worst-case time complexity of O(n) because it actually has to examine every single item in the array to make sure it finds the right one. Even though people talk about halving things, that just divides the total runtime by two one single time at the beginning, so you are still left looking through all n items sequentially. Honestly, I am not completely sure how the math works out beyond that, but it definitely takes O(n) steps in the worst case.",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "The learner exhibits the assigned misconception that binary search examines every item (taking O(n) time) and confuses repeated halving with dividing the runtime by two once.",
+              "correct": false,
+              "score": 0.0,
+              "reason": "The learner's answer is incorrect. It claims the worst-case time complexity is O(n) based on the misconception that binary search examines every item and only halves the runtime once, whereas the correct worst-case time complexity for binary search on a sorted random-access array is O(log n).",
+              "supporting_excerpt": "Binary search has a worst-case time complexity of O(n) because it actually has to examine every single item in the array",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": false,
+      "final_mastery": 0.1621
+    },
+    {
+      "profile": "novice",
+      "unit": "boundaries",
+      "level": "weak",
+      "answers": [],
+      "help": [],
+      "mastery": [],
+      "status": "running",
+      "session_id": 2
+    }
+  ],
+  "failures": [],
+  "course": {
+    "boundaries": {
+      "concept": "Binary Search Interval Boundaries",
+      "text": "Binary Search Interval Boundaries\nAssume an ascending sorted array, zero-based indices, and a half-open search interval [left, right).\nInitially left=0 and right=len(a). For ordinary exact search, while left < right choose\nmid=left+(right-left)//2. If a[mid] < target, set left=mid+1; if a[mid] > target,\nset right=mid; otherwise return mid. Return -1 if the interval becomes empty.\nBoth updates strictly shrink the interval. Never use left=mid on a two-element interval:\nit can fail to shrink. A half-open right bound is excluded, so right=len(a) is safe.\nDo not mix half-open bounds with the closed-interval rule right=mid-1.\nWith duplicates, ordinary exact search may return any matching index.\nExamples: [1,3,5,7], target 5 gives mid 2 immediately. Empty arrays return -1.\nQuestions in this unit should assess interval updates, termination, traces, or boundary bugs.",
+      "partial": "Knows half-open initialization and which side contains a target, but confuses whether mid is retained when updating the right bound. May use right=mid-1.",
+      "weak": "Knows sorted means ascending and can compare values. Does not understand half-open intervals or shrinking. Believes left=mid always makes progress and may mix inclusive and exclusive bounds."
+    },
+    "lower_bound": {
+      "concept": "Binary Search Lower Bound and Duplicates",
+      "text": "Binary Search Lower Bound and Duplicates\nFor an ascending sorted array with zero-based indices, lower_bound(a,x) is the first\nindex i with a[i] >= x, or len(a) if no such index exists. It is an insertion position.\nStart left=0, right=len(a). While left<right, mid=(left+right)//2.\nIf a[mid]<x set left=mid+1; otherwise set right=mid, including when a[mid]==x.\nReturn left. Equality must keep looking left because an earlier equal value may exist.\nTo find the first actual occurrence, compute i=lower_bound(a,x) and return i only if\ni<len(a) and a[i]==x; otherwise return -1. Insertion position and match-not-found\nare different answers: prompts must specify which is requested.\nExamples: lower_bound([1,2,2,5],2)=1; lower_bound([1,2,2,5],3)=3;\nlower_bound([1,2,2,5],9)=4; lower_bound([],2)=0.\nQuestions should assess equality updates, duplicate handling, or insertion versus first occurrence.",
+      "partial": "Knows duplicate values may appear and that first occurrence is the leftmost equal value. Can manually scan a short array, but cannot explain equality updates or absent-target insertion positions.",
+      "weak": "Can compare array values and recognizes duplicates. Believes the first equal midpoint is always the first occurrence. Stops on equality; confuses insertion position with not-found -1."
+    },
+    "complexity": {
+      "concept": "Binary Search Time Complexity",
+      "text": "Binary Search Time Complexity\nAssume a sorted random-access array and constant-time indexing/comparison.\nBinary search halves the remaining interval on each iteration. Worst-case search time\nis O(log n); best-case exact search time is O(1) if the initial midpoint matches.\nIterative binary search uses O(1) auxiliary space. Recursive search uses O(log n)\nstack space unless optimized away. Sorting an initially unsorted array generally costs\nO(n log n) and is distinct from the search cost. On a linked list constant-time random\naccess is unavailable, so the array-time argument cannot simply be applied.\nRepeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.\nThis is not necessarily the exact number of comparisons for a specified search trace:\nendpoint checks, insertion positions, and early equality exits can change that count.\nPrompts asking for an exact count must define the algorithm and counted operation.\nQuestions should assess asymptotic complexity, halving reasoning, space, or assumptions.",
+      "partial": "Knows halving is faster than scanning but cannot justify logarithmic time. May confuse time and space or count log-base-2 exactly without accounting for endpoints.",
+      "weak": "Understands n is the number of elements. Thinks binary search examines every item and therefore takes O(n) time. Confuses repeated halving with dividing the runtime by two once."
+    }
+  },
+  "profiles": {
+    "novice": {
+      "boundaries": "weak",
+      "lower_bound": "weak",
+      "complexity": "weak"
+    },
+    "mixed": {
+      "boundaries": "partial",
+      "lower_bound": "weak",
+      "complexity": "strong"
+    },
+    "strong": {
+      "boundaries": "strong",
+      "lower_bound": "strong",
+      "complexity": "strong"
+    }
+  },
+  "settings": {
+    "max_answers_per_concept": 4,
+    "proactive_help": false,
+    "web_search": false,
+    "max_runtime_seconds": 2700,
+    "max_calls": 350,
+    "request_interval_seconds": 5.0,
+    "initial_cooldown_seconds": 60.0
+  },
+  "provider": "gemini",
+  "model": "gemini-3.5-flash-lite",
+  "runtime_seconds": 325.54,
+  "usage": {
+    "external_calls": 16,
+    "external_input_tokens": 8847,
+    "external_output_tokens": 2378,
+    "tutor": {
+      "llm_calls": 25,
+      "input_tokens": 84234,
+      "output_tokens": 5153,
+      "api_latency_ms": 168886.43999999997,
+      "interventions": 2,
+      "explicit_interventions": 2,
+      "llm_errors": 1
+    }
+  },
+  "unchanged_repository_and_original_database": true,
+  "changed_original_paths": []
+}

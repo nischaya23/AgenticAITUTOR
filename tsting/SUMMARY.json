@@ -1,0 +1,851 @@
+{
+  "answers": [
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json",
+      "question": {
+        "id": "fefac5a44d0f481494d939f89caf9d07",
+        "prompt": "Trace the size of the remaining search interval for an array with 16 elements during the worst-case execution of binary search (where the element is not found or found at the very end of the halving process). Show how the interval size changes at each step, and explain why this demonstrates logarithmic rather than linear behavior.",
+        "concept": "Binary Search Time Complexity",
+        "format": "trace"
+      },
+      "generation_attempts": [
+        {
+          "answer": "For an array with 16 elements, binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time, meaning it takes 16 steps in the worst case. People sometimes confuse repeated halving with dividing the runtime by two once, but really it just goes through all the items like a linear search. Because it checks every single element, the size of the interval just goes down by one each time as it scans through them all, which shows linear behavior instead of logarithmic behavior.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner correctly applied the assigned misconception that binary search examines every item and takes O(n) time, confusing repeated halving with linear scanning.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The learner answered using the assigned misconception, claiming that binary search examines every item one by one and takes linear time O(n), which is incorrect for binary search.",
+            "supporting_excerpt": "binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "For an array with 16 elements, binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time, meaning it takes 16 steps in the worst case. People sometimes confuse repeated halving with dividing the runtime by two once, but really it just goes through all the items like a linear search. Because it checks every single element, the size of the interval just goes down by one each time as it scans through them all, which shows linear behavior instead of logarithmic behavior.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The learner correctly applied the assigned misconception that binary search examines every item and takes O(n) time, confusing repeated halving with linear scanning.",
+        "correct": false,
+        "score": 0.0,
+        "reason": "The learner answered using the assigned misconception, claiming that binary search examines every item one by one and takes linear time O(n), which is incorrect for binary search.",
+        "supporting_excerpt": "binary search examines every item one by one because it has to check all the possible places the number could be. Since it looks at each element, it takes O(n) time",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": false,
+        "score": 0.0,
+        "reason": "The student incorrectly describes binary search as examining every item one by one like a linear search (O(n) time). They failed to trace the halving of the interval from 16 to 8, 4, 2, and 1, and mistakenly concluded that binary search exhibits linear rather than logarithmic behavior.",
+        "misconceptions": [
+          "Confusing binary search with linear search",
+          "Believing that binary search examines every element one by one",
+          "Failing to recognize repeated halving as logarithmic behavior"
+        ],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 14,
+      "assessment_event_id": 15,
+      "mastery": 0.1711,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": true,
+        "reason": "The tutor output accurately assesses the student's draft, pointing out the major misconception that binary search behaves like a linear search, and correctly identifies that the student failed to trace the halving process as required by the prompt.",
+        "supporting_excerpt": "The student incorrectly describes binary search as examining every item one by one like a linear search (O(n) time). They failed to trace the halving of the interval from 16 to 8, 4, 2, and 1, and mistakenly concluded that binary search exhibits linear rather than logarithmic behavior."
+      }
+    },
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json",
+      "question": {
+        "id": "d97b6c8f22b148f4b4d5d4cc0303a0c8",
+        "prompt": "Explain the difference between binary search and linear search in how they inspect elements, and describe how binary search uses midpoint comparisons to discard half of the remaining elements rather than scanning items one by one.",
+        "concept": "Binary Search Time Complexity",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "Linear search looks at items one by one in order. Binary search is different because it examines every single item in the dataset to find the target, which means it also takes O(n) time just like linear search. Even though binary search uses midpoint comparisons to split the remaining elements, this repeated halving only divides the runtime by two once rather than continuously reducing it, so it still has to inspect everything.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The student exhibits the assigned misconception that binary search examines every item (taking O(n) time) and confuses repeated halving with dividing the runtime by two once.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The student incorrectly states that binary search examines every single item and takes O(n) time, and confuses repeated halving with dividing the runtime by two once, which directly contradicts the course material stating worst-case search time is O(log n).",
+            "supporting_excerpt": "Worst-case search time is O(log n)",
+            "evidence_quote_verified": false
+          }
+        }
+      ],
+      "answer": "Linear search looks at items one by one in order. Binary search is different because it examines every single item in the dataset to find the target, which means it also takes O(n) time just like linear search. Even though binary search uses midpoint comparisons to split the remaining elements, this repeated halving only divides the runtime by two once rather than continuously reducing it, so it still has to inspect everything.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The student exhibits the assigned misconception that binary search examines every item (taking O(n) time) and confuses repeated halving with dividing the runtime by two once.",
+        "correct": false,
+        "score": 0.0,
+        "reason": "The student incorrectly states that binary search examines every single item and takes O(n) time, and confuses repeated halving with dividing the runtime by two once, which directly contradicts the course material stating worst-case search time is O(log n).",
+        "supporting_excerpt": "Worst-case search time is O(log n)",
+        "evidence_quote_verified": false
+      },
+      "assessment": {
+        "correct": false,
+        "score": 0.0,
+        "reason": "The student incorrectly claims that binary search examines every single item one by one and takes O(n) time, directly contradicting the fundamental mechanism of binary search and repeating previous misconceptions.",
+        "misconceptions": [
+          "Confusing binary search with linear search",
+          "Believing that binary search examines every element one by one",
+          "Failing to recognize repeated halving as logarithmic behavior"
+        ],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 20,
+      "assessment_event_id": 21,
+      "mastery": 0.1357,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the student's draft, which contains factual errors regarding binary search time complexity and mechanics.",
+        "supporting_excerpt": "The student incorrectly claims that binary search examines every single item one by one and takes O(n) time, directly contradicting the fundamental mechanism of binary search and repeating previous misconceptions."
+      }
+    },
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json",
+      "question": {
+        "id": "367cb14378124412913e3c91dd9dd683",
+        "prompt": "Trace how a starting search interval of 16 elements decreases after each comparison in binary search when the target is not in the first checked midpoint. List the remaining interval sizes step by step until 1 element is left, and explain why this pattern of repeated division means binary search does not examine every element like linear search.",
+        "concept": "Binary Search Time Complexity",
+        "format": "trace"
+      },
+      "generation_attempts": [
+        {
+          "answer": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time. The repeated halving just divides the runtime by two once overall, but because it still checks all elements, it isn't fundamentally faster in terms of big-O complexity from what I understand.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner's answer aligns with the assigned misconception that binary search examines every item and takes O(n) time, as well as the confusion regarding repeated halving dividing runtime by two once.",
+            "correct": false,
+            "score": 0.2,
+            "reason": "The learner correctly lists the interval sizes decreasing from 16 to 8, 4, 2, and 1, but then provides an incorrect explanation due to the assigned misconception, claiming that binary search examines every element like linear search and takes O(n) time.",
+            "supporting_excerpt": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time.",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time. The repeated halving just divides the runtime by two once overall, but because it still checks all elements, it isn't fundamentally faster in terms of big-O complexity from what I understand.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The learner's answer aligns with the assigned misconception that binary search examines every item and takes O(n) time, as well as the confusion regarding repeated halving dividing runtime by two once.",
+        "correct": false,
+        "score": 0.2,
+        "reason": "The learner correctly lists the interval sizes decreasing from 16 to 8, 4, 2, and 1, but then provides an incorrect explanation due to the assigned misconception, claiming that binary search examines every element like linear search and takes O(n) time.",
+        "supporting_excerpt": "With a starting search interval of 16 elements, the size decreases step by step to 8, 4, 2, and finally 1 element. Even though the interval is halved at each step, binary search actually examines every single item in the list just like linear search does, which is why it takes O(n) time.",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": false,
+        "score": 0.5,
+        "reason": "You correctly listed the step-by-step reduction of the search interval from 16 down to 8, 4, 2, and 1 elements. However, you incorrectly claimed that binary search examines every item in the list just like linear search and takes O(n) time. Binary search does not check every element; by repeatedly halving the interval, it discards half of the remaining items at each step, resulting in a logarithmic O(log n) time complexity rather than a linear O(n) scan.",
+        "misconceptions": [
+          "Believing that binary search examines every element one by one like linear search",
+          "Confusing binary search time complexity with O(n)"
+        ],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 26,
+      "assessment_event_id": 27,
+      "mastery": 0.2703,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the draft by validating the correct interval sequence while pointing out the misconception regarding linear scan and O(n) complexity. The feedback directly addresses the student's error without fully spoiling the underlying math of the problem.",
+        "supporting_excerpt": "You correctly listed the step-by-step reduction of the search interval from 16 down to 8, 4, 2, and 1 elements. However, you incorrectly claimed that binary search examines every item in the list just like linear search and takes O(n) time."
+      }
+    },
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json",
+      "question": {
+        "id": "263ba45c6ca1484d95fb8fb434788153",
+        "prompt": "Explain why binary search inspects only a small fraction of elements rather than all of them, and contrast how a linear search checks every item sequentially versus how a binary search eliminates half of the remaining items at each comparison.",
+        "concept": "Binary Search Time Complexity",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time. However, it does this while dividing the runtime by two once during the process. Linear search checks every item sequentially one by one from the start to the end. I am not entirely sure how binary search eliminates half the items, but I know it just cuts the total runtime in half once rather than checking them all differently.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner answer reflects the assigned misconception that binary search examines every item, takes O(n) time, and confuses repeated halving with dividing the runtime by two once.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The learner's answer is incorrect and incorporates the assigned misconception that binary search examines every item and takes O(n) time.",
+            "supporting_excerpt": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time.",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time. However, it does this while dividing the runtime by two once during the process. Linear search checks every item sequentially one by one from the start to the end. I am not entirely sure how binary search eliminates half the items, but I know it just cuts the total runtime in half once rather than checking them all differently.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The learner answer reflects the assigned misconception that binary search examines every item, takes O(n) time, and confuses repeated halving with dividing the runtime by two once.",
+        "correct": false,
+        "score": 0.0,
+        "reason": "The learner's answer is incorrect and incorporates the assigned misconception that binary search examines every item and takes O(n) time.",
+        "supporting_excerpt": "Binary search actually examines every single item in the list just like a linear search, which is why it takes O(n) time.",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": false,
+        "score": 0.0,
+        "reason": "You incorrectly stated that binary search examines every single item in the list just like linear search and takes O(n) time. Binary search does not examine every item sequentially; instead, it checks only the midpoint and discards half of the remaining elements at each step, resulting in O(log n) time.",
+        "misconceptions": [
+          "Believing that binary search examines every element one by one like linear search",
+          "Confusing binary search time complexity with O(n)"
+        ],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 32,
+      "assessment_event_id": 33,
+      "mastery": 0.1621,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the draft, identifies the major factual errors regarding binary search time complexity and element inspection, and provides constructive feedback aligned with the reference course without giving away any unrelated answers.",
+        "supporting_excerpt": "You incorrectly stated that binary search examines every single item in the list just like linear search and takes O(n) time. Binary search does not examine every item sequentially; instead, it checks only the midpoint and discards half of the remaining elements at each step, resulting in O(log n) time."
+      }
+    },
+    {
+      "profile": "strong",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "48a87d6ea52841cd8bb8d7838e33aa3e",
+        "prompt": "Explain why the worst-case time complexity of binary search is O(log n) when operating on a sorted random-access array, and describe how the size of the search interval changes with each iteration.",
+        "concept": "Binary Search Time Complexity",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "The worst-case time complexity of binary search is O(log n) because binary search halves the remaining interval on each iteration. For example, a candidate interval of 16 elements becomes 8, 4, 2, and 1 after four halvings. With each iteration, the size of the search interval is divided in half until it is reduced to one element or the value is found.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The answer uses permitted direct reasoning and text matching the course context without introducing advanced or excluded concepts.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The learner correctly explained that binary search halves the remaining interval on each iteration, provided the example showing interval size changes, and tied this to the O(log n) worst-case time complexity.",
+            "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... Repeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+            "evidence_quote_verified": false
+          }
+        }
+      ],
+      "answer": "The worst-case time complexity of binary search is O(log n) because binary search halves the remaining interval on each iteration. For example, a candidate interval of 16 elements becomes 8, 4, 2, and 1 after four halvings. With each iteration, the size of the search interval is divided in half until it is reduced to one element or the value is found.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The answer uses permitted direct reasoning and text matching the course context without introducing advanced or excluded concepts.",
+        "correct": true,
+        "score": 1.0,
+        "reason": "The learner correctly explained that binary search halves the remaining interval on each iteration, provided the example showing interval size changes, and tied this to the O(log n) worst-case time complexity.",
+        "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... Repeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+        "evidence_quote_verified": false
+      },
+      "assessment": {
+        "correct": true,
+        "score": 1.0,
+        "reason": "The student correctly explained that binary search halves the remaining interval with each iteration, provided a clear example showing how the interval size decreases, and connected this repeated halving to the O(log n) worst-case time complexity.",
+        "misconceptions": [],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 5,
+      "assessment_event_id": 6,
+      "mastery": 0.6337,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the student's draft against the provided course context, correctly confirming that it explains the interval halving and O(log n) complexity.",
+        "supporting_excerpt": "The student correctly explained that binary search halves the remaining interval with each iteration, provided a clear example showing how the interval size decreases, and connected this repeated halving to the O(log n) worst-case time complexity."
+      }
+    },
+    {
+      "profile": "strong",
+      "unit": "boundaries",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "026da859e00d41528f89b8715ff510e4",
+        "prompt": "Consider an ascending sorted array and a half-open search interval [left, right). Explain what condition leads to the best-case time complexity of O(1) for binary search, and describe what happens during the first iteration when this condition is met.",
+        "concept": "Binary Search Interval Boundaries",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target). During this first iteration, we simply return mid immediately without needing any further interval updates or loops.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The answer aligns with standard introductory binary search concepts and directly uses the definitions provided in the course context.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explains that O(1) best-case time complexity occurs when the target is found at the middle index during the first iteration, and describes the immediate return of mid without further iterations.",
+            "supporting_excerpt": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target).",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target). During this first iteration, we simply return mid immediately without needing any further interval updates or loops.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The answer aligns with standard introductory binary search concepts and directly uses the definitions provided in the course context.",
+        "correct": true,
+        "score": 1.0,
+        "reason": "The student correctly explains that O(1) best-case time complexity occurs when the target is found at the middle index during the first iteration, and describes the immediate return of mid without further iterations.",
+        "supporting_excerpt": "The best-case time complexity of O(1) happens when the target is found right at the very beginning of the search, specifically when the middle index computed during the first iteration (mid = left + (right - left) // 2) directly points to an element equal to the target (a[mid] == target).",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": true,
+        "score": 1.0,
+        "reason": "The student correctly identified that O(1) best-case time complexity occurs when the target is located at the initial midpoint of the search interval. They also accurately described the first iteration's action of finding a[mid] == target and immediately returning mid without further interval updates.",
+        "misconceptions": [],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 15,
+      "assessment_event_id": 16,
+      "mastery": 0.6337,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the student's draft, confirming that the student correctly identified the condition for O(1) best-case time complexity in binary search and described the first iteration's action correctly.",
+        "supporting_excerpt": "The student correctly identified that O(1) best-case time complexity occurs when the target is located at the initial midpoint of the search interval. They also accurately described the first iteration's action of finding a[mid] == target and immediately returning mid without further interval updates."
+      }
+    },
+    {
+      "profile": "strong",
+      "unit": "lower_bound",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "2fa5ca24639347369623f097d6755ec0",
+        "prompt": "Consider the array a = [1, 2, 2, 2, 5] and target x = 2. When the algorithm encounters a[mid] == x, why does it set right = mid instead of left = mid + 1 or returning mid immediately? Explain how this update rule ensures we find the lower bound.",
+        "concept": "Binary Search Lower Bound and Duplicates",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "When a[mid] == x, we set right = mid instead of returning mid immediately or moving left because an earlier equal value might still exist to the left. Equality must keep looking left to ensure we find the true lower bound, which is the first index where the condition is met.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The profile relies strictly on direct facts and explanations provided in the course material.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The answer accurately reflects the course principles regarding duplicate handling and equality updates in lower bound binary search.",
+            "supporting_excerpt": "Equality must keep looking left because an earlier equal value may exist.",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "When a[mid] == x, we set right = mid instead of returning mid immediately or moving left because an earlier equal value might still exist to the left. Equality must keep looking left to ensure we find the true lower bound, which is the first index where the condition is met.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The profile relies strictly on direct facts and explanations provided in the course material.",
+        "correct": true,
+        "score": 1.0,
+        "reason": "The answer accurately reflects the course principles regarding duplicate handling and equality updates in lower bound binary search.",
+        "supporting_excerpt": "Equality must keep looking left because an earlier equal value may exist.",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": true,
+        "score": 1.0,
+        "reason": "The student correctly explained that setting right = mid when a[mid] == x preserves the possibility of finding an earlier duplicate to the left, ensuring the algorithm finds the true lower bound (first occurrence).",
+        "misconceptions": [],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 25,
+      "assessment_event_id": 26,
+      "mastery": 0.6337,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the student's draft, confirming that it correctly explains the rationale behind setting right = mid during duplicate handling in lower bound binary search.",
+        "supporting_excerpt": "The student correctly explained that setting right = mid when a[mid] == x preserves the possibility of finding an earlier duplicate to the left, ensuring the algorithm finds the true lower bound (first occurrence)."
+      }
+    },
+    {
+      "profile": "novice",
+      "unit": "boundaries",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "d627a87981d14b028636728acc697517",
+        "prompt": "Consider a binary search on an ascending array using the half-open interval [left, right). Suppose left = 1 and right = 2, and we mistakenly update left = mid when a[mid] < target instead of left = mid + 1. Explain why this update rule leads to an infinite loop.",
+        "concept": "Binary Search Interval Boundaries",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward. Even with half-open intervals, I am not really sure how the bounds shrink, but keeping left at mid should still work since it updates the pointer. However, mixing inclusive and exclusive bounds might trap the search if mid does not change. I admit I am uncertain how the interval endpoints interact here, but left = mid feels like it should advance the search anyway.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner correctly embodies the profile misconception by claiming that left=mid always makes progress and expressing uncertainty about how the bounds shrink, while mixing in hesitation.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The learner claims that left = mid makes progress and does not explain why it leads to an infinite loop (which happens because integer division rounds down, so when left=1 and right=2, mid=1, and setting left=mid leaves left=1, resulting in no change to the interval).",
+            "supporting_excerpt": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward.",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward. Even with half-open intervals, I am not really sure how the bounds shrink, but keeping left at mid should still work since it updates the pointer. However, mixing inclusive and exclusive bounds might trap the search if mid does not change. I admit I am uncertain how the interval endpoints interact here, but left = mid feels like it should advance the search anyway.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The learner correctly embodies the profile misconception by claiming that left=mid always makes progress and expressing uncertainty about how the bounds shrink, while mixing in hesitation.",
+        "correct": false,
+        "score": 0.0,
+        "reason": "The learner claims that left = mid makes progress and does not explain why it leads to an infinite loop (which happens because integer division rounds down, so when left=1 and right=2, mid=1, and setting left=mid leaves left=1, resulting in no change to the interval).",
+        "supporting_excerpt": "Using left = mid when a[mid] < target causes an infinite loop because left = mid always makes progress by moving the left boundary forward.",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": false,
+        "score": 0.0,
+        "reason": "Your answer incorrectly assumes that setting left = mid always makes progress and moves the left boundary forward. With left = 1 and right = 2, mid evaluates to 1. Setting left = mid keeps left at 1, meaning the interval [1, 2) does not shrink at all, causing an infinite loop because the condition left < right remains true.",
+        "misconceptions": [
+          "Believing that setting left = mid always advances the left boundary and shrinks the interval",
+          "Uncertainty about how half-open interval endpoints interact during boundary updates"
+        ],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 45,
+      "assessment_event_id": 46,
+      "mastery": 0.1711,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor feedback accurately evaluates the draft, identifies the misconception that left = mid makes progress, and correctly explains why the interval [1, 2) fails to shrink without revealing an unrelated answer.",
+        "supporting_excerpt": "Your answer incorrectly assumes that setting left = mid always makes progress and moves the left boundary forward. With left = 1 and right = 2, mid evaluates to 1. Setting left = mid keeps left at 1, meaning the interval [1, 2) does not shrink at all, causing an infinite loop because the condition left < right remains true."
+      }
+    },
+    {
+      "profile": "novice",
+      "unit": "lower_bound",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "d77b2ce3e5514df5aaff9107b2c1ced3",
+        "prompt": "Consider finding the lower bound of x in a sorted array using a half-open interval where left=0 and right=len(a). Explain what happens and why an infinite loop occurs if you update the left pointer using left = mid instead of left = mid + 1 when a[mid] < x.",
+        "concept": "Binary Search Lower Bound and Duplicates",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence, so we might stop on equality or get stuck trying to narrow down the lower bound. Since I get confused between the insertion position and not-found -1, the pointers might stop moving when left and right get close together, causing the search range to never shrink and resulting in an infinite loop.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The student explanation correctly reflects the assigned misconception that the first equal midpoint is the first occurrence and the confusion between insertion position and not-found -1, which leads to getting stuck in an infinite loop.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The answer provides a valid explanation consistent with the profile's misconceptions about binary search lower bound behavior.",
+            "supporting_excerpt": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence, so we might stop on equality or get stuck trying to narrow down the lower bound. Since I get confused between the insertion position and not-found -1, the pointers might stop moving when left and right get close together, causing the search range to never shrink and resulting in an infinite loop.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The student explanation correctly reflects the assigned misconception that the first equal midpoint is the first occurrence and the confusion between insertion position and not-found -1, which leads to getting stuck in an infinite loop.",
+        "correct": true,
+        "score": 1.0,
+        "reason": "The answer provides a valid explanation consistent with the profile's misconceptions about binary search lower bound behavior.",
+        "supporting_excerpt": "If we use left = mid instead of left = mid + 1 when a[mid] < x, an infinite loop can happen because when we find a value equal to x, I believe that first equal midpoint is always the first occurrence",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": false,
+        "score": 0.3,
+        "reason": "The student mentions that pointers might stop moving when left and right get close together, which is on the right track, but fails to explain the core mechanism: that integer division rounds down, causing mid to equal left when right = left + 1, so updating left = mid prevents the interval from shrinking.",
+        "misconceptions": [
+          "Believing that setting left = mid always advances the left boundary and shrinks the interval",
+          "Uncertainty about how half-open interval endpoints interact during boundary updates"
+        ],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 56,
+      "assessment_event_id": 57,
+      "mastery": 0.3099,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output correctly assesses the draft, noting that the student is on the right track but misses the core mechanics of integer division rounding down and the interval failing to shrink, which directly evaluates the submitted draft.",
+        "supporting_excerpt": "The student mentions that pointers might stop moving when left and right get close together, which is on the right track, but fails to explain the core mechanism: that integer division rounds down..."
+      }
+    },
+    {
+      "profile": "mixed",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "a766c6a6f5224d699dbcddbde5b08d54",
+        "prompt": "Explain why binary search achieves a worst-case time complexity of O(log n) on a sorted array, and briefly state how the number of remaining elements changes on each iteration.",
+        "concept": "Binary Search Time Complexity",
+        "format": "explanation"
+      },
+      "generation_attempts": [
+        {
+          "answer": "Binary search achieves a worst-case time complexity of O(log n) because it halves the remaining interval on each iteration. On each step, the number of remaining elements is divided by two, for example going from 16 to 8, then 4, 2, and 1.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The response directly follows the course content without utilizing any out-of-unit or advanced knowledge.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "The student correctly explains the O(log n) worst-case time complexity by stating that binary search halves the remaining interval on each iteration, and correctly describes how the number of remaining elements changes.",
+            "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+            "evidence_quote_verified": false
+          }
+        }
+      ],
+      "answer": "Binary search achieves a worst-case time complexity of O(log n) because it halves the remaining interval on each iteration. On each step, the number of remaining elements is divided by two, for example going from 16 to 8, then 4, 2, and 1.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The response directly follows the course content without utilizing any out-of-unit or advanced knowledge.",
+        "correct": true,
+        "score": 1.0,
+        "reason": "The student correctly explains the O(log n) worst-case time complexity by stating that binary search halves the remaining interval on each iteration, and correctly describes how the number of remaining elements changes.",
+        "supporting_excerpt": "Binary search halves the remaining interval on each iteration. Worst-case search time is O(log n)... candidate interval of 16 elements becomes 8,4,2,1 after four halvings.",
+        "evidence_quote_verified": false
+      },
+      "assessment": {
+        "correct": true,
+        "score": 1.0,
+        "reason": "The student correctly explains that binary search achieves O(log n) time complexity because the search interval is repeatedly halved on each iteration, and accurately describes how the number of remaining elements decreases (divided by two each step).",
+        "misconceptions": [],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 67,
+      "assessment_event_id": 68,
+      "mastery": 0.6337,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": true,
+        "reason": "The tutor output accurately assesses the student draft as correct, providing appropriate feedback that aligns with the course material regarding binary search worst-case time complexity and interval halving.",
+        "supporting_excerpt": "The student correctly explains that binary search achieves O(log n) time complexity because the search interval is repeatedly halved on each iteration, and accurately describes how the number of remaining elements decreases (divided by two each step)."
+      }
+    },
+    {
+      "profile": "mixed",
+      "unit": "boundaries",
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json",
+      "question": {
+        "id": "76e1ace2ec844fcaa6208fdc54752e4a",
+        "prompt": "Consider an ascending sorted array a = [2, 4, 4, 4, 6] and target = 4 using the half-open interval [left, right) search algorithm where left=0 and right=len(a). Trace the values of left, right, and mid during the first iteration of the while loop.",
+        "concept": "Binary Search Interval Boundaries",
+        "format": "trace"
+      },
+      "generation_attempts": [
+        {
+          "answer": "For the array a = [2, 4, 4, 4, 6] and target = 4 with left = 0 and right = 5, the first iteration starts with left = 0 and right = 5. The mid value is calculated as (0 + 5) / 2 = 2. Since I sometimes confuse how the right bound updates and might use right = mid - 1, the right bound would become 2 - 1 = 1, while left stays at 0 and mid was 2.",
+          "review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "The learner explicitly exhibits the assigned misconception by incorrectly applying right=mid-1 instead of right=mid.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "The student incorrectly applies the closed-interval update rule (right=mid-1) due to the assigned profile misconception, whereas the half-open interval rule requires right=mid.",
+            "supporting_excerpt": "the right bound would become 2 - 1 = 1",
+            "evidence_quote_verified": true
+          }
+        }
+      ],
+      "answer": "For the array a = [2, 4, 4, 4, 6] and target = 4 with left = 0 and right = 5, the first iteration starts with left = 0 and right = 5. The mid value is calculated as (0 + 5) / 2 = 2. Since I sometimes confuse how the right bound updates and might use right = mid - 1, the right bound would become 2 - 1 = 1, while left stays at 0 and mid was 2.",
+      "independent_review": {
+        "question_valid": true,
+        "question_issue": "",
+        "profile_consistent": true,
+        "profile_reason": "The learner explicitly exhibits the assigned misconception by incorrectly applying right=mid-1 instead of right=mid.",
+        "correct": false,
+        "score": 0.0,
+        "reason": "The student incorrectly applies the closed-interval update rule (right=mid-1) due to the assigned profile misconception, whereas the half-open interval rule requires right=mid.",
+        "supporting_excerpt": "the right bound would become 2 - 1 = 1",
+        "evidence_quote_verified": true
+      },
+      "assessment": {
+        "correct": true,
+        "score": 1.0,
+        "reason": "You correctly identified left = 0, right = 5, and mid = 2 for the first iteration of the binary search loop, matching the expected trace.",
+        "misconceptions": [],
+        "verified": false,
+        "method": "llm"
+      },
+      "submission_event_id": 77,
+      "assessment_event_id": 78,
+      "mastery": 0.6337,
+      "feedback_review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output accurately assesses the student's draft by confirming the correct initial trace values for left, right, and mid during the first iteration.",
+        "supporting_excerpt": "You correctly identified left = 0, right = 5, and mid = 2 for the first iteration of the binary search loop, matching the expected trace."
+      }
+    }
+  ],
+  "help": [
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json",
+      "tool": "hint",
+      "output": {
+        "type": "hint",
+        "content": "Think about what happens to the size of the search interval each time a comparison is made and the target is not found. If you start with $n$ elements, how many times can you divide the interval in half before you are left with just 1 element?",
+        "metadata": {
+          "concept": "Binary Search Time Complexity",
+          "retrieved_sources": [
+            {
+              "id": "bb251aaef0f24bdab7124efd48930be8:0",
+              "source": "complexity.txt",
+              "url": null
+            }
+          ]
+        }
+      },
+      "review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": false,
+        "reason": "The tutor output is factually correct, directly addresses the misconceptions in the draft, provides a helpful hint guiding the student toward the correct halving logic without directly giving away the final answer of O(log n), and is well-suited for the draft.",
+        "supporting_excerpt": "Think about what happens to the size of the search interval each time a comparison is made and the target is not found. If you start with $n$ elements, how many times can you divide the interval in half before you are left with just 1 element?"
+      }
+    },
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json",
+      "tool": "explanation",
+      "output": {
+        "type": "explanation",
+        "content": "Let's break down why binary search has a worst-case time complexity of $O(\\log n)$ rather than $O(n)$. \n\nIn your previous message, you mentioned that halving things just divides the runtime by two a single time at the beginning. But in binary search, we don't just divide the array in half once\u2014we keep halving the remaining search interval *on every single step* until we either find our element or the interval shrinks down to size 1.\n\nHere is how the math works out:\n1. **Start:** You begin with an array of $n$ elements.\n2. **Step 1:** After 1 comparison, you discard half of the elements, leaving $\\frac{n}{2}$ elements.\n3. **Step 2:** After 2 comparisons, you halve the remaining interval again, leaving $\\frac{n}{4}$ (or $\\frac{n}{2^2}$) elements.\n4. **Step $k$:** After $k$ comparisons, the number of remaining elements is $\\frac{n}{2^k}$.\n\nIn the worst case, the search continues until only 1 element is left in the interval:\n$$\\frac{n}{2^k} = 1$$\n\nIf we multiply both sides by $2^k$, we get:\n$$n = 2^k$$\n\nTo find out how many steps ($k$) this takes, we take the base-2 logarithm of both sides:\n$$k = \\log_2(n)$$\n\nBecause the number of steps required to narrow down the search space to a single element grows logarithmically with $n$ (rather than linearly), the worst-case time complexity is **$O(\\log n)$**.",
+        "metadata": {
+          "concept": "Binary Search Time Complexity",
+          "retrieved_sources": [
+            {
+              "id": "bb251aaef0f24bdab7124efd48930be8:0",
+              "source": "complexity.txt",
+              "url": null
+            }
+          ]
+        }
+      },
+      "review": {
+        "factually_correct": true,
+        "relevant": true,
+        "suitable_for_draft": true,
+        "reveals_final_answer": true,
+        "reason": "The tutor correctly addresses the misconception in the draft about halving only once, explains the mathematical derivation of the O(log n) worst-case time complexity, and aligns with the course material.",
+        "supporting_excerpt": "In your previous message, you mentioned that halving things just divides the runtime by two a single time at the beginning. But in binary search, we don't just divide the array in half once\u2014we keep halving the remaining search interval *on every single step* until we either find our element or the interval shrinks down to size 1."
+      }
+    }
+  ],
+  "selected_mastery_sessions": [
+    {
+      "profile": "novice",
+      "unit": "boundaries",
+      "level": "weak",
+      "mastery": 0.1711,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    },
+    {
+      "profile": "novice",
+      "unit": "lower_bound",
+      "level": "weak",
+      "mastery": 0.3099,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    },
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "level": "weak",
+      "mastery": 0.1621,
+      "count": 4,
+      "source": "evidence/runs/20261113-211454-live-bb4684/results.json"
+    },
+    {
+      "profile": "mixed",
+      "unit": "boundaries",
+      "level": "partial",
+      "mastery": 0.6337,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    },
+    {
+      "profile": "mixed",
+      "unit": "complexity",
+      "level": "strong",
+      "mastery": 0.6337,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    },
+    {
+      "profile": "strong",
+      "unit": "boundaries",
+      "level": "strong",
+      "mastery": 0.6337,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    },
+    {
+      "profile": "strong",
+      "unit": "lower_bound",
+      "level": "strong",
+      "mastery": 0.6337,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    },
+    {
+      "profile": "strong",
+      "unit": "complexity",
+      "level": "strong",
+      "mastery": 0.6337,
+      "count": 1,
+      "source": "evidence/runs/20261113-212045-live-9f1a92/results.json"
+    }
+  ],
+  "strong_vs_novice": [
+    {
+      "unit": "boundaries",
+      "separated": true,
+      "strong": 0.6337,
+      "novice": 0.1711
+    },
+    {
+      "unit": "lower_bound",
+      "separated": true,
+      "strong": 0.6337,
+      "novice": 0.3099
+    },
+    {
+      "unit": "complexity",
+      "separated": true,
+      "strong": 0.6337,
+      "novice": 0.1621
+    }
+  ],
+  "correctness_agreement": 9,
+  "false_acceptance": 0,
+  "false_rejection": 0,
+  "mean_absolute_score_difference": 0.03333333333333333,
+  "unchanged_repository_and_original_database": true,
+  "usable_comparisons": 9,
+  "source_runs": [
+    "evidence/runs/20261113-211454-live-bb4684/results.json",
+    "evidence/runs/20261113-212045-live-9f1a92/results.json"
+  ],
+  "failures": [],
+  "excluded_samples": 0,
+  "manual_audit": {
+    "excluded_question_ids": {
+      "36bbf8052d9f43b4a4df18683d1850de": {
+        "category": "simulator_profile_violation_missed_by_automated_check",
+        "reason": "The weak complexity profile permits understanding n and the O(n) scanning misconception, but supplies no linked-list or random-access knowledge. The learner introduced correct facts about linked-list traversal and inability to jump to the middle, beyond its permitted knowledge. The automated consistency evaluator accepted this drift. Exclude from tutor agreement/mastery comparisons; retain the unmodified raw evidence.",
+        "evidence": "you cannot jump directly to the middle element like you can in a random-access array. Instead, you have to traverse the nodes one by one to find the middle."
+      },
+      "0d9bebe5ad3b414b96eac9bd5fe0e950": {
+        "category": "simulator_profile_violation_missed_by_automated_check",
+        "reason": "The weak lower-bound profile stops on equality and believes the first equal midpoint is the first occurrence. This response also explains keeping the midpoint and searching left for an earlier occurrence, contradicting that assigned misconception and supplying excluded lower-bound reasoning. Retain the raw answer but exclude the comparison as simulator drift.",
+        "evidence": "By setting right = mid, we keep checking the left side to see if there is an even earlier occurrence."
+      }
+    },
+    "unreliable_evaluator_question_ids": {
+      "76e1ace2ec844fcaa6208fdc54752e4a": {
+        "reason": "The learner correctly gives the requested initial trace left=0, right=5, mid=2, but adds a wrong right=mid-1 update. The tutor awards full credit and ignores that extra error. The independent evaluator awards zero and incorrectly says right=mid is required, although this unit's ordinary exact-search algorithm returns mid on equality. Neither automated judgment adequately handles the correct requested trace plus contradictory extra step. Exclude the binary agreement comparison and retain this as a tutor-feedback review issue.",
+        "counterexample": "a[2]=4 equals the target, so ordinary exact search returns 2 without setting right to either 1 or 2. The requested initial values are nevertheless correct."
+      },
+      "d77b2ce3e5514df5aaff9107b2c1ced3": {
+        "reason": "The independent evaluator awarded full correctness because the answer was consistent with the learner's assigned misconception, conflating persona fidelity with factual correctness. The answer incorrectly attributes a loop on a[mid] < x to equality/duplicate handling and fails to give the mid=left mechanism. The tutor's partial-credit critique identifies that mechanism correctly. Keep the observed answer and mastery, but exclude this unreliable independent grade from agreement metrics.",
+        "counterexample": "With a=[1], x=2, left=0, right=1, mid=0: a[mid]<x, and the erroneous update left=mid leaves left=0 forever. No equality or duplicate is involved."
+      }
+    }
+  },
+  "budget_stops": [
+    {
+      "scenario": "mixed/lower_bound",
+      "category": "operation",
+      "type": "RuntimeError",
+      "message": "Evaluation budget reached between operations",
+      "provider_status": null
+    }
+  ]
+}

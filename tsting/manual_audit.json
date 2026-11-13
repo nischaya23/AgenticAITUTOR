@@ -1,0 +1,24 @@
+{
+  "excluded_question_ids": {
+    "36bbf8052d9f43b4a4df18683d1850de": {
+      "category": "simulator_profile_violation_missed_by_automated_check",
+      "reason": "The weak complexity profile permits understanding n and the O(n) scanning misconception, but supplies no linked-list or random-access knowledge. The learner introduced correct facts about linked-list traversal and inability to jump to the middle, beyond its permitted knowledge. The automated consistency evaluator accepted this drift. Exclude from tutor agreement/mastery comparisons; retain the unmodified raw evidence.",
+      "evidence": "you cannot jump directly to the middle element like you can in a random-access array. Instead, you have to traverse the nodes one by one to find the middle."
+    },
+    "0d9bebe5ad3b414b96eac9bd5fe0e950": {
+      "category": "simulator_profile_violation_missed_by_automated_check",
+      "reason": "The weak lower-bound profile stops on equality and believes the first equal midpoint is the first occurrence. This response also explains keeping the midpoint and searching left for an earlier occurrence, contradicting that assigned misconception and supplying excluded lower-bound reasoning. Retain the raw answer but exclude the comparison as simulator drift.",
+      "evidence": "By setting right = mid, we keep checking the left side to see if there is an even earlier occurrence."
+    }
+  },
+  "unreliable_evaluator_question_ids": {
+    "76e1ace2ec844fcaa6208fdc54752e4a": {
+      "reason": "The learner correctly gives the requested initial trace left=0, right=5, mid=2, but adds a wrong right=mid-1 update. The tutor awards full credit and ignores that extra error. The independent evaluator awards zero and incorrectly says right=mid is required, although this unit's ordinary exact-search algorithm returns mid on equality. Neither automated judgment adequately handles the correct requested trace plus contradictory extra step. Exclude the binary agreement comparison and retain this as a tutor-feedback review issue.",
+      "counterexample": "a[2]=4 equals the target, so ordinary exact search returns 2 without setting right to either 1 or 2. The requested initial values are nevertheless correct."
+    },
+    "d77b2ce3e5514df5aaff9107b2c1ced3": {
+      "reason": "The independent evaluator awarded full correctness because the answer was consistent with the learner's assigned misconception, conflating persona fidelity with factual correctness. The answer incorrectly attributes a loop on a[mid] < x to equality/duplicate handling and fails to give the mid=left mechanism. The tutor's partial-credit critique identifies that mechanism correctly. Keep the observed answer and mastery, but exclude this unreliable independent grade from agreement metrics.",
+      "counterexample": "With a=[1], x=2, left=0, right=1, mid=0: a[mid]<x, and the erroneous update left=mid leaves left=0 forever. No equality or duplicate is involved."
+    }
+  }
+}

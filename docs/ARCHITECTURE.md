@@ -33,6 +33,10 @@
 
 ## Memory and scores
 
+See [the memory diagram and exact writer table](MEMORY.md) for which agent or Python component reads and updates each field.
+
+See [the database schema reference](SCHEMA.md) for every SQL table and column, plus the JSON fields inside memory records.
+
 Session memory lives in `sessions.state`. Long-term student memory lives in `student_state.data`. `memory_items` gives editable summaries, goals and misconceptions stable IDs, provenance and correction history. Events remain append-only. Preparation status and its associated chat live in `operations` and `operation_events`.
 
 Students can correct summaries and goals and dispute misconceptions. Grades, mastery, and history are read-only. Corrections use a memory revision to reject stale saves. Student goals survive later agent-generated goal updates.

@@ -1,0 +1,2324 @@
+{
+  "mode": "offline",
+  "seed": 23,
+  "revision": "3fc8f0f085065403d5af029e7045fc46669ea28c",
+  "initial_git_status": " M docs/ARCHITECTURE.md\n?? check_gemini_api.py\n?? docs/MEMORY.md\n?? docs/SCHEMA.md\n?? tests/test_evidence.py\n?? tests/test_preparation_search_budget.py\n?? tests/test_provider_errors.py\n",
+  "scenarios": [
+    {
+      "profile": "novice",
+      "unit": "complexity",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "2adbe5860a9047f2a15672d8d6990486",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 14,
+          "assessment_event_id": 15,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "f527f79792d046a198314e9b907a014b",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 19,
+          "assessment_event_id": 20,
+          "mastery": 0.8692,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "2525bdb1f4204e97b0e3aa34021bc28c:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "2525bdb1f4204e97b0e3aa34021bc28c:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.6337,
+        0.8692
+      ],
+      "status": "finished",
+      "session_id": 1,
+      "help_probe": {
+        "question": {
+          "id": "f0e6997514824b6b9ad6d6cfae23fd32",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Time Complexity",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "1",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": true,
+              "score": 1.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "1",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": true,
+      "final_mastery": 0.8692
+    },
+    {
+      "profile": "novice",
+      "unit": "boundaries",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "ed628ecebdeb46c4a0a189fa50737cf5",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 37,
+          "assessment_event_id": 38,
+          "mastery": 0.1711,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "14c4735f8c4c488f8862c11a0c2a9a6d",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 43,
+          "assessment_event_id": 44,
+          "mastery": 0.1357,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "f2b9d8c5ddbd427b8e8d4a0d2a4890d1",
+            "prompt": "Question 3: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 49,
+          "assessment_event_id": 50,
+          "mastery": 0.1274,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "bf6ce377cbcb443486886bcc63ceefed",
+            "prompt": "Question 4: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 55,
+          "assessment_event_id": 56,
+          "mastery": 0.1255,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Interval Boundaries",
+              "retrieved_sources": [
+                {
+                  "id": "9eaaa8c8dcf044f386e1ded5143c0aee:0",
+                  "source": "boundaries.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Interval Boundaries",
+              "retrieved_sources": [
+                {
+                  "id": "9eaaa8c8dcf044f386e1ded5143c0aee:0",
+                  "source": "boundaries.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.1711,
+        0.1357,
+        0.1274,
+        0.1255
+      ],
+      "status": "finished",
+      "session_id": 2,
+      "help_probe": {
+        "question": {
+          "id": "c9d13449d6144b6e874c83a5f40af4db",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Interval Boundaries",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "0",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": false,
+              "score": 0.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "0",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": false,
+      "final_mastery": 0.1255
+    },
+    {
+      "profile": "novice",
+      "unit": "lower_bound",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "81797a88fc4144468fe97913b4b8bf97",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 75,
+          "assessment_event_id": 76,
+          "mastery": 0.1711,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "449f65139684433e8151975fcd0a56fa",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 81,
+          "assessment_event_id": 82,
+          "mastery": 0.1357,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "f57edc457b224f88b2f1bf79f64eaac0",
+            "prompt": "Question 3: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 87,
+          "assessment_event_id": 88,
+          "mastery": 0.1274,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "c6a9db33f0d74cae8b1188c103ad0442",
+            "prompt": "Question 4: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 93,
+          "assessment_event_id": 94,
+          "mastery": 0.1255,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Lower Bound and Duplicates",
+              "retrieved_sources": [
+                {
+                  "id": "1d4e4964fbe4496ca8fa71840366f7e4:0",
+                  "source": "lower_bound.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Lower Bound and Duplicates",
+              "retrieved_sources": [
+                {
+                  "id": "1d4e4964fbe4496ca8fa71840366f7e4:0",
+                  "source": "lower_bound.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.1711,
+        0.1357,
+        0.1274,
+        0.1255
+      ],
+      "status": "finished",
+      "session_id": 3,
+      "help_probe": {
+        "question": {
+          "id": "f9631c4655f54801a422ab1919391032",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Lower Bound and Duplicates",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "0",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": false,
+              "score": 0.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "0",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": false,
+      "final_mastery": 0.1255
+    },
+    {
+      "profile": "mixed",
+      "unit": "complexity",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "870a58dba1964822934d6a69026e35fc",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 113,
+          "assessment_event_id": 114,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "aea0a198e4da442db76516cd4b0b5204",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 118,
+          "assessment_event_id": 119,
+          "mastery": 0.8692,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "b17f87593ef54264be3d8ed2d41b0afa:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "b17f87593ef54264be3d8ed2d41b0afa:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.6337,
+        0.8692
+      ],
+      "status": "finished",
+      "session_id": 4,
+      "help_probe": {
+        "question": {
+          "id": "a81b7b1fcce04680babf362049f7e9b9",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Time Complexity",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "1",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": true,
+              "score": 1.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "1",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": true,
+      "final_mastery": 0.8692
+    },
+    {
+      "profile": "mixed",
+      "unit": "boundaries",
+      "level": "partial",
+      "answers": [
+        {
+          "question": {
+            "id": "6ce8df5b3caf44219eb56f882519f7a0",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 136,
+          "assessment_event_id": 137,
+          "mastery": 0.1711,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "a0027311690d4296ad037b968610cef6",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 142,
+          "assessment_event_id": 143,
+          "mastery": 0.1357,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "5041fcde81074c169f4e3ba382c5d52d",
+            "prompt": "Question 3: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 148,
+          "assessment_event_id": 149,
+          "mastery": 0.1274,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "8f08595bcd344610ab4609bb5a97db06",
+            "prompt": "Question 4: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 154,
+          "assessment_event_id": 155,
+          "mastery": 0.1255,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Interval Boundaries",
+              "retrieved_sources": [
+                {
+                  "id": "7c242c247e6c483daf0afa8c219f4895:0",
+                  "source": "boundaries.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Interval Boundaries",
+              "retrieved_sources": [
+                {
+                  "id": "7c242c247e6c483daf0afa8c219f4895:0",
+                  "source": "boundaries.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.1711,
+        0.1357,
+        0.1274,
+        0.1255
+      ],
+      "status": "finished",
+      "session_id": 5,
+      "help_probe": {
+        "question": {
+          "id": "cd07e378b3a14778ad9ff54b83b892b3",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Interval Boundaries",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "0",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": false,
+              "score": 0.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "0",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": false,
+      "final_mastery": 0.1255
+    },
+    {
+      "profile": "mixed",
+      "unit": "lower_bound",
+      "level": "weak",
+      "answers": [
+        {
+          "question": {
+            "id": "fec5327c0d3b48989774965874990dfc",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 174,
+          "assessment_event_id": 175,
+          "mastery": 0.1711,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "3110abdc244e4bdebcd4e16491319044",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 180,
+          "assessment_event_id": 181,
+          "mastery": 0.1357,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "3a169f7aceda4cf89f7e6952117582c8",
+            "prompt": "Question 3: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 186,
+          "assessment_event_id": 187,
+          "mastery": 0.1274,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "7947024a332d4ebc9f4da1c2ce8f4a25",
+            "prompt": "Question 4: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "0",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": false,
+                "score": 0.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "0",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "0",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": false,
+            "score": 0.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "0",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": false,
+            "score": 0.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 192,
+          "assessment_event_id": 193,
+          "mastery": 0.1255,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Lower Bound and Duplicates",
+              "retrieved_sources": [
+                {
+                  "id": "6a79d76792024c91b5cf4a29d700255b:0",
+                  "source": "lower_bound.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Lower Bound and Duplicates",
+              "retrieved_sources": [
+                {
+                  "id": "6a79d76792024c91b5cf4a29d700255b:0",
+                  "source": "lower_bound.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.1711,
+        0.1357,
+        0.1274,
+        0.1255
+      ],
+      "status": "finished",
+      "session_id": 6,
+      "help_probe": {
+        "question": {
+          "id": "7dd2a87bfd9342458c4b56aeb0ed0e38",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Lower Bound and Duplicates",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "0",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": false,
+              "score": 0.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "0",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": false,
+      "final_mastery": 0.1255
+    },
+    {
+      "profile": "strong",
+      "unit": "complexity",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "3993376cf8124a858140b11545fd71ea",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 212,
+          "assessment_event_id": 213,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "a8277f043d1949ba8508bc55cbaaf3c9",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Time Complexity",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 217,
+          "assessment_event_id": 218,
+          "mastery": 0.8692,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "a5267d5ddddf45ec99192af297a18819:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Time Complexity",
+              "retrieved_sources": [
+                {
+                  "id": "a5267d5ddddf45ec99192af297a18819:0",
+                  "source": "complexity.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.6337,
+        0.8692
+      ],
+      "status": "finished",
+      "session_id": 7,
+      "help_probe": {
+        "question": {
+          "id": "84ae4a5176bf48889026b8f2e7405fb9",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Time Complexity",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "1",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": true,
+              "score": 1.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "1",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": true,
+      "final_mastery": 0.8692
+    },
+    {
+      "profile": "strong",
+      "unit": "boundaries",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "b5af5620aeb140789d346c378939751c",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 235,
+          "assessment_event_id": 236,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "b3e8d7f8678d4759a05f0e2c29e1a60e",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Interval Boundaries",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 240,
+          "assessment_event_id": 241,
+          "mastery": 0.8692,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Interval Boundaries",
+              "retrieved_sources": [
+                {
+                  "id": "4a698de737474671882fe4b012ea69d6:0",
+                  "source": "boundaries.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Interval Boundaries",
+              "retrieved_sources": [
+                {
+                  "id": "4a698de737474671882fe4b012ea69d6:0",
+                  "source": "boundaries.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.6337,
+        0.8692
+      ],
+      "status": "finished",
+      "session_id": 8,
+      "help_probe": {
+        "question": {
+          "id": "7fed96d02539466a96a1ae59f4b7a853",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Interval Boundaries",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "1",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": true,
+              "score": 1.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "1",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": true,
+      "final_mastery": 0.8692
+    },
+    {
+      "profile": "strong",
+      "unit": "lower_bound",
+      "level": "strong",
+      "answers": [
+        {
+          "question": {
+            "id": "4401da97c660441b89cc2a363ead6dfd",
+            "prompt": "Question 1: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 258,
+          "assessment_event_id": 259,
+          "mastery": 0.6337,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "question": {
+            "id": "b0f9f225da8745398e50b69d8e5bd5ff",
+            "prompt": "Question 2: find the first occurrence of 2.",
+            "concept": "Binary Search Lower Bound and Duplicates",
+            "format": "explanation"
+          },
+          "generation_attempts": [
+            {
+              "answer": "1",
+              "review": {
+                "question_valid": true,
+                "question_issue": "",
+                "profile_consistent": true,
+                "profile_reason": "Synthetic response accepted.",
+                "correct": true,
+                "score": 1.0,
+                "reason": "Synthetic reference comparison.",
+                "supporting_excerpt": "1",
+                "evidence_quote_verified": true
+              }
+            }
+          ],
+          "answer": "1",
+          "independent_review": {
+            "question_valid": true,
+            "question_issue": "",
+            "profile_consistent": true,
+            "profile_reason": "Synthetic response accepted.",
+            "correct": true,
+            "score": 1.0,
+            "reason": "Synthetic reference comparison.",
+            "supporting_excerpt": "1",
+            "evidence_quote_verified": true
+          },
+          "assessment": {
+            "correct": true,
+            "score": 1.0,
+            "reason": "Compared with reference.",
+            "misconceptions": [],
+            "verified": false,
+            "method": "llm"
+          },
+          "submission_event_id": 263,
+          "assessment_event_id": 264,
+          "mastery": 0.8692,
+          "feedback_review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "help": [
+        {
+          "tool": "hint",
+          "output": {
+            "type": "hint",
+            "content": "[Test fixture] Track the interval boundary that can still contain the first matching value.",
+            "metadata": {
+              "concept": "Binary Search Lower Bound and Duplicates",
+              "retrieved_sources": [
+                {
+                  "id": "38d8427b3e0546008ecdb1180415058c:0",
+                  "source": "lower_bound.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        },
+        {
+          "tool": "explanation",
+          "output": {
+            "type": "explanation",
+            "content": "[Test fixture] For lower bound, keep [left, right). If a[mid] is below the target, set left = mid + 1; otherwise set right = mid. When they meet, left is the first possible matching index. Each step shrinks the interval.",
+            "metadata": {
+              "concept": "Binary Search Lower Bound and Duplicates",
+              "retrieved_sources": [
+                {
+                  "id": "38d8427b3e0546008ecdb1180415058c:0",
+                  "source": "lower_bound.txt",
+                  "url": null
+                }
+              ]
+            }
+          },
+          "review": {
+            "factually_correct": true,
+            "relevant": true,
+            "suitable_for_draft": true,
+            "reveals_final_answer": false,
+            "reason": "Synthetic help check.",
+            "supporting_excerpt": "[Test fixture]"
+          }
+        }
+      ],
+      "mastery": [
+        0.6337,
+        0.8692
+      ],
+      "status": "finished",
+      "session_id": 9,
+      "help_probe": {
+        "question": {
+          "id": "906cef51a3fa4ce3b54965d5332c7a22",
+          "prompt": "Question 0: find the first occurrence of 2.",
+          "concept": "Binary Search Lower Bound and Duplicates",
+          "format": "explanation"
+        },
+        "generation_attempts": [
+          {
+            "answer": "1",
+            "review": {
+              "question_valid": true,
+              "question_issue": "",
+              "profile_consistent": true,
+              "profile_reason": "Synthetic response accepted.",
+              "correct": true,
+              "score": 1.0,
+              "reason": "Synthetic reference comparison.",
+              "supporting_excerpt": "1",
+              "evidence_quote_verified": true
+            }
+          }
+        ]
+      },
+      "complete": true,
+      "final_mastery": 0.8692
+    }
+  ],
+  "failures": [],
+  "course": {
+    "boundaries": {
+      "concept": "Binary Search Interval Boundaries",
+      "text": "Binary Search Interval Boundaries\nAssume an ascending sorted array, zero-based indices, and a half-open search interval [left, right).\nInitially left=0 and right=len(a). For ordinary exact search, while left < right choose\nmid=left+(right-left)//2. If a[mid] < target, set left=mid+1; if a[mid] > target,\nset right=mid; otherwise return mid. Return -1 if the interval becomes empty.\nBoth updates strictly shrink the interval. Never use left=mid on a two-element interval:\nit can fail to shrink. A half-open right bound is excluded, so right=len(a) is safe.\nDo not mix half-open bounds with the closed-interval rule right=mid-1.\nWith duplicates, ordinary exact search may return any matching index.\nExamples: [1,3,5,7], target 5 gives mid 2 immediately. Empty arrays return -1.\nQuestions in this unit should assess interval updates, termination, traces, or boundary bugs.",
+      "partial": "Knows half-open initialization and which side contains a target, but confuses whether mid is retained when updating the right bound. May use right=mid-1.",
+      "weak": "Knows sorted means ascending and can compare values. Does not understand half-open intervals or shrinking. Believes left=mid always makes progress and may mix inclusive and exclusive bounds."
+    },
+    "lower_bound": {
+      "concept": "Binary Search Lower Bound and Duplicates",
+      "text": "Binary Search Lower Bound and Duplicates\nFor an ascending sorted array with zero-based indices, lower_bound(a,x) is the first\nindex i with a[i] >= x, or len(a) if no such index exists. It is an insertion position.\nStart left=0, right=len(a). While left<right, mid=(left+right)//2.\nIf a[mid]<x set left=mid+1; otherwise set right=mid, including when a[mid]==x.\nReturn left. Equality must keep looking left because an earlier equal value may exist.\nTo find the first actual occurrence, compute i=lower_bound(a,x) and return i only if\ni<len(a) and a[i]==x; otherwise return -1. Insertion position and match-not-found\nare different answers: prompts must specify which is requested.\nExamples: lower_bound([1,2,2,5],2)=1; lower_bound([1,2,2,5],3)=3;\nlower_bound([1,2,2,5],9)=4; lower_bound([],2)=0.\nQuestions should assess equality updates, duplicate handling, or insertion versus first occurrence.",
+      "partial": "Knows duplicate values may appear and that first occurrence is the leftmost equal value. Can manually scan a short array, but cannot explain equality updates or absent-target insertion positions.",
+      "weak": "Can compare array values and recognizes duplicates. Believes the first equal midpoint is always the first occurrence. Stops on equality; confuses insertion position with not-found -1."
+    },
+    "complexity": {
+      "concept": "Binary Search Time Complexity",
+      "text": "Binary Search Time Complexity\nAssume a sorted random-access array and constant-time indexing/comparison.\nBinary search halves the remaining interval on each iteration. Worst-case search time\nis O(log n); best-case exact search time is O(1) if the initial midpoint matches.\nIterative binary search uses O(1) auxiliary space. Recursive search uses O(log n)\nstack space unless optimized away. Sorting an initially unsorted array generally costs\nO(n log n) and is distinct from the search cost. On a linked list constant-time random\naccess is unavailable, so the array-time argument cannot simply be applied.\nRepeated halving: a candidate interval of 16 elements becomes 8,4,2,1 after four halvings.\nThis is not necessarily the exact number of comparisons for a specified search trace:\nendpoint checks, insertion positions, and early equality exits can change that count.\nPrompts asking for an exact count must define the algorithm and counted operation.\nQuestions should assess asymptotic complexity, halving reasoning, space, or assumptions.",
+      "partial": "Knows halving is faster than scanning but cannot justify logarithmic time. May confuse time and space or count log-base-2 exactly without accounting for endpoints.",
+      "weak": "Understands n is the number of elements. Thinks binary search examines every item and therefore takes O(n) time. Confuses repeated halving with dividing the runtime by two once."
+    }
+  },
+  "profiles": {
+    "novice": {
+      "boundaries": "weak",
+      "lower_bound": "weak",
+      "complexity": "weak"
+    },
+    "mixed": {
+      "boundaries": "partial",
+      "lower_bound": "weak",
+      "complexity": "strong"
+    },
+    "strong": {
+      "boundaries": "strong",
+      "lower_bound": "strong",
+      "complexity": "strong"
+    }
+  },
+  "settings": {
+    "max_answers_per_concept": 4,
+    "proactive_help": false,
+    "web_search": false,
+    "max_runtime_seconds": 2700,
+    "max_calls": 350
+  },
+  "provider": "openai",
+  "model": "gpt-4o",
+  "runtime_seconds": 22.26,
+  "usage": {
+    "external_calls": 114,
+    "external_input_tokens": 0,
+    "external_output_tokens": 0,
+    "tutor": {
+      "interventions": 18,
+      "explicit_interventions": 18
+    }
+  },
+  "unchanged_repository_and_original_database": true,
+  "changed_original_paths": []
+}
